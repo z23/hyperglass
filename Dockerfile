@@ -18,7 +18,7 @@ RUN pnpm install -P
 
 FROM ui as hyperglass
 WORKDIR /opt/hyperglass
-RUN pip3 install -e .
+RUN pip3 install -r requirements.lock && pip3 install --no-deps -e .
 
 EXPOSE ${HYPERGLASS_PORT}
 CMD ["python3", "-m", "hyperglass.console", "start"]

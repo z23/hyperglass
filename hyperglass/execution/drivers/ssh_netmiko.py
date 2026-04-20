@@ -29,7 +29,9 @@ netmiko_device_globals = {
     "mikrotik_switchos": {"global_cmd_verify": False},
 }
 
-netmiko_device_send_args = {}
+netmiko_device_send_args = {
+    "arista_eos": {"read_timeout": 120},
+}
 
 
 class NetmikoConnection(SSHConnection):

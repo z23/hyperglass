@@ -191,12 +191,12 @@ AristaBGPRouteVRF = BuiltinDirective(
         RuleWithIPv4(
             condition="0.0.0.0/0",
             action="permit",
-            command="show ip bgp vrf {vrf} {target}",
+            command="show ip bgp {target} vrf {vrf}",
         ),
         RuleWithIPv6(
             condition="::/0",
             action="permit",
-            command="show ipv6 bgp vrf {vrf} {target}",
+            command="show ipv6 bgp {target} vrf {vrf}",
         ),
     ],
     field=Text(description="IP Address, Prefix, or Hostname"),
@@ -285,12 +285,12 @@ AristaBGPRouteVRFTable = BuiltinDirective(
         RuleWithIPv4(
             condition="0.0.0.0/0",
             action="permit",
-            command="show ip bgp vrf {vrf} {target} | json",
+            command="show ip bgp {target} vrf {vrf} | json",
         ),
         RuleWithIPv6(
             condition="::/0",
             action="permit",
-            command="show ipv6 bgp vrf {vrf} {target} | json",
+            command="show ipv6 bgp {target} vrf {vrf} | json",
         ),
     ],
     field=Text(description="IP Address, Prefix, or Hostname"),

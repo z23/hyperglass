@@ -75,6 +75,9 @@ class BGPRoutePluginArista(OutputPlugin):
         "__hyperglass_arista_eos_bgp_route_table__",
         "__hyperglass_arista_eos_bgp_aspath_table__",
         "__hyperglass_arista_eos_bgp_community_table__",
+        "__hyperglass_arista_eos_bgp_route_vrf_table__",
+        "__hyperglass_arista_eos_bgp_aspath_vrf_table__",
+        "__hyperglass_arista_eos_bgp_community_vrf_table__",
     )
 
     def process(self, *, output: "OutputType", query: "Query") -> "OutputType":

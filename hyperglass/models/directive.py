@@ -10,6 +10,7 @@ from pydantic import Field, FilePath, PrivateAttr, IPvAnyNetwork, field_validato
 
 # Project
 from hyperglass.log import log
+from hyperglass.util import get_fmt_keys
 from hyperglass.types import Series
 from hyperglass.settings import Settings
 from hyperglass.exceptions.private import InputValidationError
@@ -366,8 +367,27 @@ DirectiveT = t.Union[BuiltinDirective, Directive]
 class Directives(MultiModel[Directive], model=Directive, unique_by="id"):
     """Collection of directives."""
 
-    def device_builtins(self, *, platform: str, table_output: bool):
-        """Get builtin directives for a device."""
+    def device_builtins(
+        self,
+        *,
+        platform: str,
+        table_output: bool,
+        attrs: t.Optional[t.Mapping[str, str]] = None,
+    ):
+        """Get builtin directives for a device.
+
+        Builtin directives whose command templates reference a `{placeholder}` that
+        the device hasn't supplied in `attrs` are filtered out, so e.g. VRF variants
+        only load on devices that have `attrs.vrf` set.
+        """
+        supplied = set(attrs or {}) | {"target", "mask"}
+
+        def has_required_attrs(directive: "Directive") -> bool:
+            for rule in directive.rules:
+                for command in rule.commands:
+                    if not set(get_fmt_keys(command)).issubset(supplied):
+                        return False
+            return True
 
         return Directives(
             *(
@@ -375,6 +395,7 @@ class Directives(MultiModel[Directive], model=Directive, unique_by="id"):
                 for directive in self
                 if directive._hyperglass_builtin is True
                 and platform in getattr(directive, "platforms", ())
+                and has_required_attrs(directive)
             )
         )
 

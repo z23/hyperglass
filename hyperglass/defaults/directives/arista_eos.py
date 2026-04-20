@@ -18,6 +18,14 @@ __all__ = (
     "AristaBGPRouteTable",
     "AristaBGPASPathTable",
     "AristaBGPCommunityTable",
+    "AristaBGPRouteVRF",
+    "AristaBGPASPathVRF",
+    "AristaBGPCommunityVRF",
+    "AristaPingVRF",
+    "AristaTracerouteVRF",
+    "AristaBGPRouteVRFTable",
+    "AristaBGPASPathVRFTable",
+    "AristaBGPCommunityVRFTable",
 )
 
 NAME = "Arista EOS"
@@ -166,6 +174,156 @@ AristaBGPCommunityTable = BuiltinDirective(
             commands=[
                 "show ip bgp community {target} | json",
                 "show ipv6 bgp community {target} | json",
+            ],
+        )
+    ],
+    field=Text(description="BGP Community String"),
+    platforms=PLATFORMS,
+)
+
+# VRF-aware variants. These load only on devices that define `attrs.vrf`
+# (see Directives.device_builtins).
+
+AristaBGPRouteVRF = BuiltinDirective(
+    id="__hyperglass_arista_eos_bgp_route_vrf__",
+    name="BGP Route (VRF)",
+    rules=[
+        RuleWithIPv4(
+            condition="0.0.0.0/0",
+            action="permit",
+            command="show ip bgp vrf {vrf} {target}",
+        ),
+        RuleWithIPv6(
+            condition="::/0",
+            action="permit",
+            command="show ipv6 bgp vrf {vrf} {target}",
+        ),
+    ],
+    field=Text(description="IP Address, Prefix, or Hostname"),
+    table_output="__hyperglass_arista_eos_bgp_route_vrf_table__",
+    platforms=PLATFORMS,
+)
+
+AristaBGPASPathVRF = BuiltinDirective(
+    id="__hyperglass_arista_eos_bgp_aspath_vrf__",
+    name="BGP AS Path (VRF)",
+    rules=[
+        RuleWithPattern(
+            condition="*",
+            action="permit",
+            commands=[
+                "show ip bgp vrf {vrf} regexp {target}",
+                "show ipv6 bgp vrf {vrf} regexp {target}",
+            ],
+        )
+    ],
+    field=Text(description="AS Path Regular Expression"),
+    table_output="__hyperglass_arista_eos_bgp_aspath_vrf_table__",
+    platforms=PLATFORMS,
+)
+
+AristaBGPCommunityVRF = BuiltinDirective(
+    id="__hyperglass_arista_eos_bgp_community_vrf__",
+    name="BGP Community (VRF)",
+    rules=[
+        RuleWithPattern(
+            condition="*",
+            action="permit",
+            commands=[
+                "show ip bgp vrf {vrf} community {target}",
+                "show ipv6 bgp vrf {vrf} community {target}",
+            ],
+        )
+    ],
+    field=Text(description="BGP Community String"),
+    table_output="__hyperglass_arista_eos_bgp_community_vrf_table__",
+    platforms=PLATFORMS,
+)
+
+AristaPingVRF = BuiltinDirective(
+    id="__hyperglass_arista_eos_ping_vrf__",
+    name="Ping (VRF)",
+    rules=[
+        RuleWithIPv4(
+            condition="0.0.0.0/0",
+            action="permit",
+            command="ping vrf {vrf} ip {target} source {source4}",
+        ),
+        RuleWithIPv6(
+            condition="::/0",
+            action="permit",
+            command="ping vrf {vrf} ipv6 {target} source {source6}",
+        ),
+    ],
+    field=Text(description="IP Address, Prefix, or Hostname"),
+    platforms=PLATFORMS,
+)
+
+AristaTracerouteVRF = BuiltinDirective(
+    id="__hyperglass_arista_eos_traceroute_vrf__",
+    name="Traceroute (VRF)",
+    rules=[
+        RuleWithIPv4(
+            condition="0.0.0.0/0",
+            action="permit",
+            command="traceroute vrf {vrf} ip {target} source {source4}",
+        ),
+        RuleWithIPv6(
+            condition="::/0",
+            action="permit",
+            command="traceroute vrf {vrf} ipv6 {target} source {source6}",
+        ),
+    ],
+    field=Text(description="IP Address, Prefix, or Hostname"),
+    platforms=PLATFORMS,
+)
+
+AristaBGPRouteVRFTable = BuiltinDirective(
+    id="__hyperglass_arista_eos_bgp_route_vrf_table__",
+    name="BGP Route (VRF)",
+    rules=[
+        RuleWithIPv4(
+            condition="0.0.0.0/0",
+            action="permit",
+            command="show ip bgp vrf {vrf} {target} | json",
+        ),
+        RuleWithIPv6(
+            condition="::/0",
+            action="permit",
+            command="show ipv6 bgp vrf {vrf} {target} | json",
+        ),
+    ],
+    field=Text(description="IP Address, Prefix, or Hostname"),
+    platforms=PLATFORMS,
+)
+
+AristaBGPASPathVRFTable = BuiltinDirective(
+    id="__hyperglass_arista_eos_bgp_aspath_vrf_table__",
+    name="BGP AS Path (VRF)",
+    rules=[
+        RuleWithPattern(
+            condition="*",
+            action="permit",
+            commands=[
+                "show ip bgp vrf {vrf} regexp {target} | json",
+                "show ipv6 bgp vrf {vrf} regexp {target} | json",
+            ],
+        )
+    ],
+    field=Text(description="AS Path Regular Expression"),
+    platforms=PLATFORMS,
+)
+
+AristaBGPCommunityVRFTable = BuiltinDirective(
+    id="__hyperglass_arista_eos_bgp_community_vrf_table__",
+    name="BGP Community (VRF)",
+    rules=[
+        RuleWithPattern(
+            condition="*",
+            action="permit",
+            commands=[
+                "show ip bgp vrf {vrf} community {target} | json",
+                "show ipv6 bgp vrf {vrf} community {target} | json",
             ],
         )
     ],

@@ -288,8 +288,14 @@ class Device(HyperglassModelWithId, extra="allow"):
         ]
         # Directives matching provided IDs.
         device_directives = directives.filter(*directive_ids)
-        # Matching built-in directives for this device's platform.
-        builtins = directives.device_builtins(platform=platform, table_output=structured_output)
+        # Matching built-in directives for this device's platform. `attrs` is
+        # passed so builtins whose templates require keys the device doesn't
+        # supply (e.g. VRF variants without `attrs.vrf`) are filtered out.
+        builtins = directives.device_builtins(
+            platform=platform,
+            table_output=structured_output,
+            attrs=info.data.get("attrs") or {},
+        )
 
         if directive_options.builtins is True:
             # Add all builtins.

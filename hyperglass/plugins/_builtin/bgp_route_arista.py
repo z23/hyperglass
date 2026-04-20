@@ -31,6 +31,9 @@ def parse_arista(output: t.Sequence[str]) -> "OutputDataModel":
     _log = log.bind(plugin=BGPRoutePluginArista.__name__)
 
     for response in output:
+        raw_preview = response if len(response) <= 2000 else response[:2000] + "...[truncated]"
+        _log.debug("Raw device response", length=len(response), response=raw_preview)
+
         try:
             parsed: t.Dict = json.loads(response)
 
@@ -48,19 +51,34 @@ def parse_arista(output: t.Sequence[str]) -> "OutputDataModel":
                 result += bgp_table
 
         except json.JSONDecodeError as err:
-            _log.bind(error=str(err)).critical("Failed to decode JSON")
+            _log.bind(
+                error=str(err),
+                lineno=getattr(err, "lineno", None),
+                colno=getattr(err, "colno", None),
+                pos=getattr(err, "pos", None),
+                response_length=len(response),
+                response=raw_preview,
+            ).critical("Failed to decode JSON from device response")
             raise ParsingError("Error parsing response data") from err
 
         except KeyError as err:
-            _log.bind(key=str(err)).critical("Missing required key in response")
+            _log.bind(
+                key=str(err),
+                available_keys=list(parsed.keys()) if isinstance(parsed, dict) else None,
+                response=raw_preview,
+            ).critical("Missing required key in response")
             raise ParsingError("Error parsing response data") from err
 
         except IndexError as err:
-            _log.critical(err)
+            _log.bind(error=str(err), response=raw_preview).critical(
+                "Index error while parsing response"
+            )
             raise ParsingError("Error parsing response data") from err
 
         except ValidationError as err:
-            _log.critical(err)
+            _log.bind(errors=err.errors(), response=raw_preview).critical(
+                "Validation error while parsing response"
+            )
             raise ParsingError(err.errors()) from err
 
     return result
@@ -75,6 +93,9 @@ class BGPRoutePluginArista(OutputPlugin):
         "__hyperglass_arista_eos_bgp_route_table__",
         "__hyperglass_arista_eos_bgp_aspath_table__",
         "__hyperglass_arista_eos_bgp_community_table__",
+        "__hyperglass_arista_eos_bgp_route_vrf_table__",
+        "__hyperglass_arista_eos_bgp_aspath_vrf_table__",
+        "__hyperglass_arista_eos_bgp_community_vrf_table__",
     )
 
     def process(self, *, output: "OutputType", query: "Query") -> "OutputType":

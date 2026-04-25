@@ -23,8 +23,33 @@ from ..config.devices import Device
 
 
 QueryLocation = Annotated[str, StringConstraints(strict=True, min_length=1, strip_whitespace=True)]
-QueryTarget = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
+QueryTarget = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=255, strip_whitespace=True),
+]
 QueryType = Annotated[str, StringConstraints(strict=True, min_length=1, strip_whitespace=True)]
+
+# Characters that must never appear in a query target. Rejecting these here is a
+# cheap, type-level defense against CLI/shell metacharacter injection at the
+# device side: anything in this set would let an attacker break out of the
+# `command.format(target=...)` template in `execution.drivers._construct`.
+_QUERY_TARGET_FORBIDDEN = frozenset(
+    "\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f"
+    "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"
+    "\x7f"  # DEL
+    ";|&`<>\"\\"
+)
+
+
+def _check_query_target(value: str) -> str:
+    """Reject targets containing control characters or shell/CLI metacharacters."""
+    bad = sorted({c for c in value if c in _QUERY_TARGET_FORBIDDEN})
+    if bad:
+        raise InputValidationError(
+            error="Target contains disallowed character(s)",
+            target=value,
+        )
+    return value
 
 
 class SimpleQuery(BaseModel):
@@ -106,6 +131,14 @@ class Query(BaseModel):
 
     def validate_query_target(self) -> None:
         """Validate a query target after all fields/relationships have been initialized."""
+        # Reject control characters and CLI/shell metacharacters before any
+        # rule-based validation. Defense in depth: even with a permissive
+        # directive regex, these characters must never reach a device CLI.
+        if isinstance(self.query_target, list):
+            for item in self.query_target:
+                _check_query_target(item)
+        else:
+            _check_query_target(self.query_target)
         # Run config/rule-based validations.
         self.directive.validate_target(self.query_target)
         # Run plugin-based validations.

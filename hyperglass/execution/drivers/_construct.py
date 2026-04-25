@@ -29,6 +29,20 @@ if t.TYPE_CHECKING:
 
 FormatterCallback = t.Callable[[str], t.Union[t.List[str], str]]
 
+# Final, post-formatter defense before a target is interpolated into a device
+# command. Anything in this set, if present in the *post-validation* target,
+# would let an attacker break out of the command template (CLI pipe, statement
+# separator, redirect, embedded newline, etc.). This duplicates the type-level
+# check in `models.api.query`; the two together mean a regression in either
+# the QueryTarget constraint or a custom directive's regex still cannot reach
+# `send_command`.
+_FORBIDDEN_TARGET_CHARS = frozenset(
+    "\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f"
+    "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"
+    "\x7f"
+    ";|&`<>\"\\"
+)
+
 
 class Construct:
     """Construct SSH commands/REST API parameters from validated query data."""
@@ -109,6 +123,13 @@ class Construct:
                 mask = network.netmask
         except ValueError:
             pass
+
+        target_str = str(self.target)
+        if any(c in _FORBIDDEN_TARGET_CHARS for c in target_str):
+            raise InputInvalid(
+                error="Target contains disallowed character(s)",
+                target=target_str,
+            )
 
         return command.format(target=self.target, mask=mask, **attrs)
 

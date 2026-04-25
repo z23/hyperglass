@@ -201,15 +201,31 @@ class RuleWithPattern(Rule):
     _type: RuleTypeAttr = "pattern"
     condition: str
 
+    # When `condition == "*"`, accept only characters that are legitimately part
+    # of BGP AS-path regex syntax (anchors, quantifiers, groups, character
+    # classes) or BGP community values. CLI metacharacters (`|`, `;`, `&`,
+    # `<`, `>`, backtick, quotes, whitespace control, etc.) are excluded so a
+    # user cannot break out of `command.format(target=...)` on the device.
+    # Regex alternation (`|`) is intentionally not allowed: most built-in
+    # vendor directives interpolate the target unquoted, where `|` would be
+    # parsed as a CLI pipe filter rather than regex alternation. Custom
+    # directives should set an explicit `condition` regex.
+    _WILDCARD_PATTERN = re.compile(
+        r"[A-Za-z0-9:_\-\^\$\.\*\+\?\(\)\[\] ]+"
+    )
+
     def validate_target(self, target: str, *, multiple: bool) -> str:  # noqa: C901
         """Validate a string target against configured regex patterns."""
 
         def validate_single_value(value: str) -> t.Union[bool, BaseException]:
             if self.condition == "*":
-                pattern = re.compile(".+", re.IGNORECASE)
+                pattern = self._WILDCARD_PATTERN
             else:
                 pattern = re.compile(self.condition, re.IGNORECASE)
-            is_match = pattern.match(value)
+            # `fullmatch` (not `match`) ensures the entire target conforms to
+            # the pattern. With `match`, a pattern like `[0-9]+` would accept
+            # `123;reboot` because the match anchors only at the start.
+            is_match = pattern.fullmatch(value)
 
             if is_match and self.action == "permit":
                 return True
@@ -272,6 +288,23 @@ class Directive(HyperglassUniqueModel, unique_by=("id", "table_output")):
     groups: t.List[str] = []
     multiple: bool = False
     multiple_separator: str = " "
+
+    @field_validator("multiple_separator")
+    @classmethod
+    def validate_multiple_separator(cls, value: str) -> str:
+        """Restrict the multi-target join character to safe values.
+
+        The separator is interpolated unquoted between user-supplied targets
+        and then sent verbatim to the device CLI. Allowing arbitrary separators
+        would make multi-target queries an injection vector if an operator
+        misconfigured the value (e.g. `;` or `|`).
+        """
+        allowed = {" ", ","}
+        if value not in allowed:
+            raise ValueError(
+                f"multiple_separator must be one of {sorted(allowed)!r}, got {value!r}"
+            )
+        return value
 
     @field_validator("rules", mode="before")
     @classmethod

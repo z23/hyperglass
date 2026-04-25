@@ -14,9 +14,6 @@ These tests pin the security guarantees of the input pipeline:
 # Standard Library
 import pytest
 
-# Project
-from hyperglass.exceptions.private import InputValidationError
-
 # Local
 from ..directive import Directive, RuleWithPattern
 

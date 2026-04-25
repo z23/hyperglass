@@ -15,6 +15,7 @@ from hyperglass.log import log
 from hyperglass.util import snake_to_camel, repr_from_attrs
 from hyperglass.state import use_state
 from hyperglass.plugins import InputPluginManager
+from hyperglass.constants import FORBIDDEN_TARGET_CHARS
 from hyperglass.exceptions.public import InputInvalid, QueryTypeNotFound, QueryLocationNotFound
 from hyperglass.exceptions.private import InputValidationError
 
@@ -29,22 +30,14 @@ QueryTarget = Annotated[
 ]
 QueryType = Annotated[str, StringConstraints(strict=True, min_length=1, strip_whitespace=True)]
 
-# Characters that must never appear in a query target. Rejecting these here is a
-# cheap, type-level defense against CLI/shell metacharacter injection at the
-# device side: anything in this set would let an attacker break out of the
-# `command.format(target=...)` template in `execution.drivers._construct`.
-_QUERY_TARGET_FORBIDDEN = frozenset(
-    "\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f"
-    "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"
-    "\x7f"  # DEL
-    ";|&`<>\"\\"
-)
-
-
 def _check_query_target(value: str) -> str:
-    """Reject targets containing control characters or shell/CLI metacharacters."""
-    bad = sorted({c for c in value if c in _QUERY_TARGET_FORBIDDEN})
-    if bad:
+    """Reject targets containing control characters or shell/CLI metacharacters.
+
+    The forbidden set is the canonical `FORBIDDEN_TARGET_CHARS` from
+    `hyperglass.constants`; the same set is checked again at the device
+    transport boundary (`execution.drivers._construct`).
+    """
+    if any(c in FORBIDDEN_TARGET_CHARS for c in value):
         raise InputValidationError(
             error="Target contains disallowed character(s)",
             target=value,

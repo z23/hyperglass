@@ -214,7 +214,9 @@ class RuleWithPattern(Rule):
         r"[A-Za-z0-9:_\-\^\$\.\*\+\?\(\)\[\] ]+"
     )
 
-    def validate_target(self, target: str, *, multiple: bool) -> str:  # noqa: C901
+    def validate_target(  # noqa: C901
+        self, target: t.Union[str, t.List[str]], *, multiple: bool
+    ) -> bool:
         """Validate a string target against configured regex patterns."""
 
         def validate_single_value(value: str) -> t.Union[bool, BaseException]:

@@ -14,7 +14,11 @@ import ipaddress
 # Project
 from hyperglass.log import log
 from hyperglass.util import get_fmt_keys
-from hyperglass.constants import TRANSPORT_REST, TARGET_FORMAT_SPACE
+from hyperglass.constants import (
+    TRANSPORT_REST,
+    TARGET_FORMAT_SPACE,
+    FORBIDDEN_TARGET_CHARS,
+)
 from hyperglass.exceptions.public import InputInvalid
 from hyperglass.exceptions.private import ConfigError
 
@@ -30,18 +34,10 @@ if t.TYPE_CHECKING:
 FormatterCallback = t.Callable[[str], t.Union[t.List[str], str]]
 
 # Final, post-formatter defense before a target is interpolated into a device
-# command. Anything in this set, if present in the *post-validation* target,
-# would let an attacker break out of the command template (CLI pipe, statement
-# separator, redirect, embedded newline, etc.). This duplicates the type-level
-# check in `models.api.query`; the two together mean a regression in either
-# the QueryTarget constraint or a custom directive's regex still cannot reach
-# `send_command`.
-_FORBIDDEN_TARGET_CHARS = frozenset(
-    "\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f"
-    "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"
-    "\x7f"
-    ";|&`<>\"\\"
-)
+# command. The same `FORBIDDEN_TARGET_CHARS` set is checked at the type-level
+# boundary in `models.api.query`; running it again here means a regression in
+# either the QueryTarget constraint or a custom directive's regex still
+# cannot reach `send_command`.
 
 
 class Construct:
@@ -125,7 +121,7 @@ class Construct:
             pass
 
         target_str = str(self.target)
-        if any(c in _FORBIDDEN_TARGET_CHARS for c in target_str):
+        if any(c in FORBIDDEN_TARGET_CHARS for c in target_str):
             raise InputInvalid(
                 error="Target contains disallowed character(s)",
                 target=target_str,

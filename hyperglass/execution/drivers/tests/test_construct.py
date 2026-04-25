@@ -11,6 +11,7 @@ from hyperglass.configuration import init_ui_params
 from hyperglass.models.directive import Directives
 from hyperglass.models.config.params import Params
 from hyperglass.models.config.devices import Devices
+from hyperglass.exceptions.public import InputInvalid
 
 # Local
 from .._construct import Construct
@@ -88,3 +89,23 @@ def test_construct(state):
     )
     constructor = Construct(device=state.devices["test1"], query=query)
     assert constructor.target == "192.0.2.0/24"
+
+
+@pytest.mark.parametrize("metachar", [";", "|", "\n", "`", '"', "<", ">", "\\"])
+def test_construct_format_rejects_forbidden_post_formatter_target(state, metachar):
+    """Layer-3 defense in depth must reject a metachar in `self.target`.
+
+    Even if Layers 1/2 are bypassed (e.g. by a plugin transform that injects
+    a metacharacter, or a `RuleWithoutValidation` directive),
+    `Construct.format()` must still refuse to build the command string.
+    Simulated by mutating `target` post-init to a forbidden value.
+    """
+    query = Query(
+        queryLocation="test1",
+        queryTarget="192.0.2.0/24",
+        queryType="juniper_bgp_route",
+    )
+    constructor = Construct(device=state.devices["test1"], query=query)
+    constructor.target = f"192.0.2.0/24{metachar}id"
+    with pytest.raises(InputInvalid):
+        constructor.format("show route {target}")

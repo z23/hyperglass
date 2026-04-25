@@ -14,7 +14,11 @@ import ipaddress
 # Project
 from hyperglass.log import log
 from hyperglass.util import get_fmt_keys
-from hyperglass.constants import TRANSPORT_REST, TARGET_FORMAT_SPACE
+from hyperglass.constants import (
+    TRANSPORT_REST,
+    TARGET_FORMAT_SPACE,
+    FORBIDDEN_TARGET_CHARS,
+)
 from hyperglass.exceptions.public import InputInvalid
 from hyperglass.exceptions.private import ConfigError
 
@@ -28,6 +32,12 @@ if t.TYPE_CHECKING:
     from hyperglass.models.config.devices import Device
 
 FormatterCallback = t.Callable[[str], t.Union[t.List[str], str]]
+
+# Final, post-formatter defense before a target is interpolated into a device
+# command. The same `FORBIDDEN_TARGET_CHARS` set is checked at the type-level
+# boundary in `models.api.query`; running it again here means a regression in
+# either the QueryTarget constraint or a custom directive's regex still
+# cannot reach `send_command`.
 
 
 class Construct:
@@ -109,6 +119,13 @@ class Construct:
                 mask = network.netmask
         except ValueError:
             pass
+
+        target_str = str(self.target)
+        if any(c in FORBIDDEN_TARGET_CHARS for c in target_str):
+            raise InputInvalid(
+                error="Target contains disallowed character(s)",
+                target=target_str,
+            )
 
         return command.format(target=self.target, mask=mask, **attrs)
 

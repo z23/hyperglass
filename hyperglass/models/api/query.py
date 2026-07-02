@@ -15,6 +15,7 @@ from hyperglass.log import log
 from hyperglass.util import snake_to_camel, repr_from_attrs
 from hyperglass.state import use_state
 from hyperglass.plugins import InputPluginManager
+from hyperglass.constants import FORBIDDEN_TARGET_CHARS
 from hyperglass.exceptions.public import InputInvalid, QueryTypeNotFound, QueryLocationNotFound
 from hyperglass.exceptions.private import InputValidationError
 
@@ -23,8 +24,25 @@ from ..config.devices import Device
 
 
 QueryLocation = Annotated[str, StringConstraints(strict=True, min_length=1, strip_whitespace=True)]
-QueryTarget = Annotated[str, StringConstraints(min_length=1, strip_whitespace=True)]
+QueryTarget = Annotated[
+    str,
+    StringConstraints(min_length=1, max_length=255, strip_whitespace=True),
+]
 QueryType = Annotated[str, StringConstraints(strict=True, min_length=1, strip_whitespace=True)]
+
+def _check_query_target(value: str) -> str:
+    """Reject targets containing control characters or shell/CLI metacharacters.
+
+    The forbidden set is the canonical `FORBIDDEN_TARGET_CHARS` from
+    `hyperglass.constants`; the same set is checked again at the device
+    transport boundary (`execution.drivers._construct`).
+    """
+    if any(c in FORBIDDEN_TARGET_CHARS for c in value):
+        raise InputValidationError(
+            error="Target contains disallowed character(s)",
+            target=value,
+        )
+    return value
 
 
 class SimpleQuery(BaseModel):
@@ -106,6 +124,14 @@ class Query(BaseModel):
 
     def validate_query_target(self) -> None:
         """Validate a query target after all fields/relationships have been initialized."""
+        # Reject control characters and CLI/shell metacharacters before any
+        # rule-based validation. Defense in depth: even with a permissive
+        # directive regex, these characters must never reach a device CLI.
+        if isinstance(self.query_target, list):
+            for item in self.query_target:
+                _check_query_target(item)
+        else:
+            _check_query_target(self.query_target)
         # Run config/rule-based validations.
         self.directive.validate_target(self.query_target)
         # Run plugin-based validations.

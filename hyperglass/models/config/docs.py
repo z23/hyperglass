@@ -36,7 +36,12 @@ class EndpointConfig(HyperglassModel):
 class Docs(HyperglassModel):
     """Validation model for params.docs."""
 
-    enable: bool = Field(True, title="Enable", description="Enable or disable API documentation.")
+    enable: bool = Field(
+        False,
+        title="Enable",
+        description="Enable or disable API documentation. Disabled by default so the public "
+        "OpenAPI/Swagger UI is not exposed unless an operator explicitly opts in.",
+    )
     base_url: HttpUrl = Field(
         "https://lg.example.net",
         title="Base URL",

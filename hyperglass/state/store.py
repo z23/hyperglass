@@ -9,7 +9,6 @@ from .manager import StateManager
 if t.TYPE_CHECKING:
     # Project
     from hyperglass.models.ui import UIParameters
-    from hyperglass.plugins._base import HyperglassPlugin
     from hyperglass.models.directive import Directive, Directives
     from hyperglass.models.config.params import Params
     from hyperglass.models.config.devices import Devices
@@ -18,26 +17,8 @@ if t.TYPE_CHECKING:
     from .manager import RedisManager
 
 
-PluginT = t.TypeVar("PluginT", bound="HyperglassPlugin")
-
-
 class HyperglassState(StateManager):
     """Primary hyperglass state container."""
-
-    def add_plugin(self, _type: str, plugin: "HyperglassPlugin") -> None:
-        """Add a plugin to its list by type."""
-        current = self.plugins(_type)
-        self.redis.set(("plugins", _type), list({*current, plugin}))
-
-    def remove_plugin(self, _type: str, plugin: "HyperglassPlugin") -> None:
-        """Remove a plugin from its list by type."""
-        current = self.plugins(_type)
-        plugins = {p for p in current if p != plugin}
-        self.redis.set(("plugins", _type), list(plugins))
-
-    def reset_plugins(self, _type: str) -> None:
-        """Remove all plugins of `_type`."""
-        self.redis.set(("plugins", _type), [])
 
     def add_directive(self, *directives: t.Union["Directive", t.Dict[str, t.Any]]) -> None:
         """Add a directive."""
@@ -57,23 +38,38 @@ class HyperglassState(StateManager):
     @property
     def params(self) -> "Params":
         """Get hyperglass configuration parameters (`hyperglass.yaml`)."""
-        return self.redis.get("params", raise_if_none=True)
+        from hyperglass.models.config.params import Params
+
+        raw = self.redis.get("params", raise_if_none=True)
+        return raw if isinstance(raw, Params) else Params.model_validate(raw)
 
     @property
     def devices(self) -> "Devices":
         """Get hyperglass devices (`devices.yaml`)."""
-        return self.redis.get("devices", raise_if_none=True)
+        from hyperglass.models.config.devices import Devices
+
+        raw = self.redis.get("devices", raise_if_none=True)
+        if isinstance(raw, Devices):
+            return raw
+        # MultiModel stores its items as a list; reconstruct from the root list.
+        items = raw.root if hasattr(raw, "root") else raw
+        return Devices(*items)
 
     @property
     def ui_params(self) -> "UIParameters":
         """UI parameters, built from params."""
-        return self.redis.get("ui_params", raise_if_none=True)
+        from hyperglass.models.ui import UIParameters
+
+        raw = self.redis.get("ui_params", raise_if_none=True)
+        return raw if isinstance(raw, UIParameters) else UIParameters.model_validate(raw)
 
     @property
     def directives(self) -> "Directives":
         """All directives."""
-        return self.redis.get("directives", raise_if_none=True)
+        from hyperglass.models.directive import Directives
 
-    def plugins(self, _type: str) -> t.List[PluginT]:
-        """Get plugins by type."""
-        return self.redis.get(("plugins", _type), raise_if_none=False, value_if_none=[])
+        raw = self.redis.get("directives", raise_if_none=True)
+        if isinstance(raw, Directives):
+            return raw
+        items = raw.root if hasattr(raw, "root") else raw
+        return Directives(*items)

@@ -5,6 +5,7 @@ import logging
 
 # Third Party
 from litestar import Litestar
+from litestar.stores.memory import MemoryStore
 from litestar.openapi import OpenAPIConfig
 from litestar.exceptions import HTTPException, ValidationException
 from litestar.static_files import create_static_files_router
@@ -17,7 +18,7 @@ from hyperglass.exceptions import HyperglassError
 # Local
 from .events import check_redis
 from .routes import info, query, device, devices, queries
-from .middleware import COMPRESSION_CONFIG, create_cors_config
+from .middleware import COMPRESSION_CONFIG, create_cors_config, create_rate_limit_middleware
 from .error_handlers import app_handler, http_handler, default_handler, validation_handler
 
 __all__ = ("app",)
@@ -68,5 +69,9 @@ app = Litestar(
     debug=STATE.settings.debug,
     cors_config=create_cors_config(state=STATE),
     compression_config=COMPRESSION_CONFIG,
+    middleware=create_rate_limit_middleware(state=STATE),
+    # The rate-limit middleware looks up its counter store by name; register an
+    # in-memory store so it is always available regardless of Redis state.
+    stores={"rate_limit": MemoryStore()},
     openapi_config=OPEN_API if STATE.params.docs.enable else None,
 )

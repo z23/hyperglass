@@ -1,7 +1,8 @@
 """Interact with redis for state management."""
 
 # Standard Library
-import pickle
+import json
+import base64
 import typing as t
 from types import TracebackType
 from typing import overload
@@ -15,6 +16,48 @@ if t.TYPE_CHECKING:
     # Third Party
     from redis import Redis
     from redis.client import Pipeline
+
+
+class StateDecodeError(StateError):
+    """Raised when a cached value cannot be decoded.
+
+    Most commonly seen when upgrading hyperglass: values previously written
+    with the legacy `pickle` codec are unreadable by the JSON codec. The query
+    cache self-expires, and configuration is rewritten on startup, so the
+    correct response is to treat the key as a cache miss.
+    """
+
+
+def _encode(value: t.Any) -> bytes:
+    """Serialize a value for storage in Redis as JSON.
+
+    `bytes` are base64-encoded (there is no bytes literal in JSON). Pydantic
+    models are coerced to JSON-native dicts via `model_dump(mode="json")` so
+    non-JSON-native field types (Url, Path, IPvAnyAddress, etc.) are stringified
+    automatically; callers revalidate back to models at the typed-accessor layer
+    (see `HyperglassState`). Plain JSON-native values pass straight through.
+    """
+    if isinstance(value, bytes):
+        return json.dumps({"__bytes__": base64.b64encode(value).decode()}).encode()
+    if hasattr(value, "model_dump_json"):
+        return value.model_dump_json().encode()
+    return json.dumps(value).encode()
+
+
+def _decode(raw: bytes) -> t.Any:
+    """Deserialize a value previously written by `_encode`.
+
+    Raises `StateDecodeError` for non-JSON payloads (e.g. legacy pickled
+    values from older hyperglass releases) instead of crashing, so callers can
+    treat the failure as a cache miss.
+    """
+    try:
+        decoded = json.loads(raw)
+    except (json.JSONDecodeError, UnicodeDecodeError) as err:
+        raise StateDecodeError("Cached value is not valid JSON: {err}", err=err) from err
+    if isinstance(decoded, t.Dict) and set(decoded.keys()) == {"__bytes__"}:
+        return base64.b64decode(decoded["__bytes__"])
+    return decoded
 
 
 class RedisManager:
@@ -92,7 +135,14 @@ class RedisManager:
         name = self.key(key)
         value: t.Optional[bytes] = self.instance.get(name)
         if isinstance(value, bytes):
-            return pickle.loads(value)  # noqa
+            try:
+                return _decode(value)
+            except StateDecodeError as err:
+                log.bind(key=key, name=name).warning(
+                    "Ignoring undecodable cached value (treating as cache miss): {err}", err=err
+                )
+                self.instance.delete(name)
+                value = None
         if raise_if_none is True:
             raise StateError("'{key}' ('{name}') does not exist in Redis store", key=key, name=name)
         if value_if_none is not None:
@@ -102,7 +152,7 @@ class RedisManager:
     def set(self, key: t.Union[str, t.Sequence[str]], value: t.Any) -> None:
         """Add an object to the cache."""
         name = self.key(key)
-        self.instance.set(name, pickle.dumps(value))
+        self.instance.set(name, _encode(value))
 
     @overload
     def get_map(self, key: str, item: str) -> t.Any:
@@ -116,18 +166,35 @@ class RedisManager:
         """Get a Redis hash map or hash map value."""
         name = self.key(key)
         if isinstance(item, str):
-            value = self.instance.hget(name, item)
+            raw = self.instance.hget(name, item)
+            if raw is None:
+                return None
+            values = {item: raw}
         else:
-            value = self.instance.hgetall(name)
+            values = self.instance.hgetall(name)
 
-        if isinstance(value, bytes):
-            return pickle.loads(value)  # noqa
-        return None
+        decoded: t.Dict[str, t.Any] = {}
+        for field, raw in values.items():
+            # Redis hash field names come back as bytes; normalize to str.
+            field_name = field.decode() if isinstance(field, bytes) else field
+            if not isinstance(raw, bytes):
+                continue
+            try:
+                decoded[field_name] = _decode(raw)
+            except StateDecodeError as err:
+                log.bind(key=key, field=field_name).warning(
+                    "Ignoring undecodable cached map item: {err}", err=err
+                )
+                self.instance.hdel(name, field_name)
+
+        if isinstance(item, str):
+            return decoded.get(item)
+        return decoded
 
     def set_map_item(self, key: str, item: str, value: t.Any) -> None:
         """Add a value to a hash map (dict)."""
         name = self.key(key)
-        self.instance.hset(name, item, pickle.dumps(value))
+        self.instance.hset(name, item, _encode(value))
 
     def pipeline(self):
         """Enter a Redis Pipeline, but expose all the custom interaction methods."""

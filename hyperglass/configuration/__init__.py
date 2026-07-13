@@ -34,7 +34,9 @@ def init_user_config(
     _directives = builtins + _custom
     with state.cache.pipeline() as pipeline:
         # Write params and directives to the cache first to avoid a race condition where ui_params
-        # or devices try to access params or directives before they're available.
+        # or devices try to access params or directives before they're available. The cache codec
+        # serializes via JSON (`_encode`); typed accessors on HyperglassState revalidate back to
+        # pydantic models on read.
         pipeline.set("params", _params)
         pipeline.set("directives", _directives)
 

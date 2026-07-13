@@ -6,7 +6,6 @@ from inspect import isclass
 
 # Project
 from hyperglass.log import log
-from hyperglass.state import use_state
 from hyperglass.exceptions.private import PluginError, InputValidationError
 
 # Local
@@ -16,24 +15,31 @@ from ._output import OutputType, OutputPlugin
 
 if t.TYPE_CHECKING:
     # Project
-    from hyperglass.state import HyperglassState
     from hyperglass.models.api.query import Query
 
-PluginT = t.TypeVar("PluginT", bound=HyperglassPlugin)
+PluginT = t.TypeVar("PluginT", bound="HyperglassPlugin")
 
 
 class PluginManager(t.Generic[PluginT]):
-    """Manage all plugins."""
+    """Manage all plugins.
+
+    Plugins are held in a per-process, class-level registry rather than in the
+    Redis cache. Plugin instances carry behavior (methods, closures) that is not
+    serializable, and each uvicorn worker registers its own plugins at startup
+    via ``register_all_plugins()``, so an in-process registry is both
+    sufficient and avoids storing non-serializable objects in Redis.
+    """
 
     _type: PluginType
-    _state: "HyperglassState"
     _index: int = 0
-    _cache_key: str
+
+    # Per-process registry: {plugin_type: [plugin_instance, ...]}.
+    # Class-level so all manager instances of the same type share one list.
+    _REGISTRY: t.ClassVar[t.Dict[str, t.List["HyperglassPlugin"]]] = {}
 
     def __init__(self: "PluginManager") -> None:
         """Initialize plugin manager."""
-        self._state = use_state()
-        self._cache_key = f"hyperglass.plugins.{self._type}"
+        self._REGISTRY.setdefault(self._type, [])
 
     def __init_subclass__(cls: "PluginManager", **kwargs: PluginType) -> None:
         """Set this plugin manager's type on subclass initialization."""
@@ -58,7 +64,7 @@ class PluginManager(t.Generic[PluginT]):
 
     def plugins(self: "PluginManager", *, builtins: bool = True) -> t.List[PluginT]:
         """Get all plugins, with built-in plugins last."""
-        plugins = self._state.plugins(self._type)
+        plugins = list(self._REGISTRY.get(self._type, []))
 
         if builtins is False:
             plugins = [p for p in plugins if p._hyperglass_builtin is False]
@@ -93,14 +99,16 @@ class PluginManager(t.Generic[PluginT]):
     def reset(self: "PluginManager") -> None:
         """Remove all plugins."""
         self._index = 0
-        self._state.reset_plugins(self._type)
+        self._REGISTRY[self._type] = []
 
     def unregister(self: "PluginManager", plugin: PluginT) -> None:
         """Remove a plugin from currently active plugins."""
         if isclass(plugin):
             if issubclass(plugin, HyperglassPlugin):
-                self._state.remove_plugin(self._type, plugin)
-
+                current = self._REGISTRY.get(self._type, [])
+                # Match registered instances by their class, since `plugin` is
+                # a class while the registry holds instances.
+                self._REGISTRY[self._type] = [p for p in current if not isinstance(p, plugin)]
                 return
         raise PluginError("Plugin '{}' is not a valid hyperglass plugin", repr(plugin))
 
@@ -110,7 +118,9 @@ class PluginManager(t.Generic[PluginT]):
         try:
             if issubclass(plugin, HyperglassPlugin):
                 instance = plugin(*args, **kwargs)
-                self._state.add_plugin(self._type, instance)
+                current = self._REGISTRY.setdefault(self._type, [])
+                if instance not in current:
+                    current.append(instance)
                 _log = log.bind(type=self._type, name=instance.name)
                 if instance._hyperglass_builtin is True:
                     _log.debug("Registered built-in plugin")

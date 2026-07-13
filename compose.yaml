@@ -1,6 +1,17 @@
 services:
     redis:
         image: "redis:alpine"
+        # Auth-gate Redis even though it is not published to the host. If the
+        # bridge network is ever exposed (misconfiguration, another container
+        # on it), an attacker still cannot read/write cache keys or achieve the
+        # arbitrary-object deserialization that used to be reachable via pickle.
+        command: >
+            sh -c "redis-server --requirepass \"$${HYPERGLASS_REDIS_PASSWORD}\""
+        environment:
+            - HYPERGLASS_REDIS_PASSWORD=${HYPERGLASS_REDIS_PASSWORD:?HYPERGLASS_REDIS_PASSWORD must be set}
+        networks:
+            - internal
+
     hyperglass:
         depends_on:
             - redis
@@ -11,7 +22,8 @@ services:
             - HYPERGLASS_DEBUG=${HYPERGLASS_DEBUG-false}
             - HYPERGLASS_DEV_MODE=${HYPERGLASS_DEV_MODE-false}
             - HYPERGLASS_REDIS_HOST=${HYPERGLASS_REDIS_HOST-redis}
-            - HYPEGLASS_DISABLE_UI=${HYPEGLASS_DISABLE_UI-false}
+            - HYPERGLASS_REDIS_PASSWORD=${HYPERGLASS_REDIS_PASSWORD:?HYPERGLASS_REDIS_PASSWORD must be set}
+            - HYPERGLASS_DISABLE_UI=${HYPERGLASS_DISABLE_UI-false}
             - HYPERGLASS_CONTAINER=${HYPERGLASS_CONTAINER-true}
             - HYPERGLASS_ORIGINAL_APP_PATH=${HYPERGLASS_APP_PATH}
         build: .
@@ -19,3 +31,11 @@ services:
             - "${HYPERGLASS_PORT-8001}:${HYPERGLASS_PORT-8001}"
         volumes:
             - ${HYPERGLASS_APP_PATH-/etc/hyperglass}:/etc/hyperglass
+        networks:
+            - internal
+
+networks:
+    # Private bridge network: Redis and hyperglass talk to each other but Redis
+    # is never published to the host or the public internet.
+    internal:
+        driver: bridge

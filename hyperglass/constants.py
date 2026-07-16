@@ -93,9 +93,50 @@ LINUX_PLATFORMS = (
 # `models.api.query`, again at the device-transport boundary in
 # `execution.drivers._construct`) so a regression in either layer cannot let
 # a CLI/shell metacharacter reach a device.
+#
+# Lone `$`, `(`, and `)` are intentionally *not* listed here: they are
+# legitimate in BGP AS-path regular expressions (end anchors, groups). Shell
+# command/parameter substitution is blocked separately via
+# `FORBIDDEN_TARGET_SUBSTRINGS` (see `target_contains_forbidden_content`).
 FORBIDDEN_TARGET_CHARS = frozenset(
     "\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f"
     "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"
     "\x7f"  # DEL
     ";|&`<>\"\\"
 )
+
+# Multi-character sequences that are never legitimate looking-glass input.
+# `$(...)` / `${...}` enable unauthenticated RCE on linux_ssh platforms
+# (FRR/BIRD/OpenBGPD) where Netmiko delivers the command to a bash login shell
+# and built-in directives interpolate `{target}` inside double quotes
+# (`vtysh -c "… {target}"`), where unescaped `$` still expands.
+FORBIDDEN_TARGET_SUBSTRINGS = ("$(", "${")
+
+
+def target_contains_forbidden_content(value: str) -> bool:
+    """Return True if `value` contains a forbidden char or shell-substitution sequence."""
+    if any(c in FORBIDDEN_TARGET_CHARS for c in value):
+        return True
+    return any(seq in value for seq in FORBIDDEN_TARGET_SUBSTRINGS)
+
+
+def shell_escape_linux_target(value: str) -> str:
+    r"""Escape a target for safe interpolation into a Linux shell command line.
+
+    Netmiko uses ``device_type=linux_ssh`` for FRR/BIRD/OpenBGPD and sends the
+    full command string to a bash login shell. Built-in directives wrap
+    ``{target}`` in double quotes, where unescaped ``$`` and backticks still
+    expand. Escaping backslash, ``$``, backtick, and ``"`` makes bash pass the
+    literal target through to the tool (so a legitimate AS-path anchor like
+    ``^65000$`` reaches vtysh as ``^65000$``, while ``$(reboot)`` becomes inert
+    text).
+
+    Call only for ``LINUX_PLATFORMS``. Pure CLI NOS (Arista, Cisco, Juniper, …)
+    do not evaluate shell metacharacters and must receive the target verbatim.
+    """
+    return (
+        value.replace("\\", "\\\\")
+        .replace("`", "\\`")
+        .replace("$", "\\$")
+        .replace('"', '\\"')
+    )

@@ -5,6 +5,27 @@ description: Setting up a reverse proxy for hyperglass
 
 import { Cards, Callout } from "nextra/components";
 
+<Callout type="warning">
+    **A reverse proxy is required for production.** hyperglass should never be exposed directly to
+    the internet on its application port. Always put [Caddy](https://caddyserver.com) (recommended),
+    [NGINX](https://www.nginx.com), [Apache](https://httpd.apache.org), or another reverse proxy in
+    front of it, and bind hyperglass to localhost (or a private network) only.
+</Callout>
+
+## Why a reverse proxy is required
+
+hyperglass is an unauthenticated looking glass: each query can open a live session to a network
+device. A reverse proxy gives you:
+
+| Concern | What the proxy provides |
+| --- | --- |
+| **TLS** | HTTPS termination (e.g. automatic Let's Encrypt with Caddy). |
+| **Client identity** | A single hop that sets or overwrites `X-Forwarded-For` / `X-Real-IP` so rate limiting keys on the real client. Litestar trusts these headers; if the app port is reachable without a sanitizing proxy, clients can rotate spoofed `X-Forwarded-For` values and bypass the per-client rate limit. |
+| **Attack surface** | Keep the uvicorn workers off the public internet; only the proxy listens on `:443` / `:80`. |
+
+The stock `compose.yaml` publishes hyperglass on `127.0.0.1` only so it is not world-reachable
+by default. Point Caddy (or another proxy) at that local port.
+
 [Caddy](https://caddyserver.com) is recommended, but any reverse proxy ([NGINX](https://www.nginx.com), [Apache2](https://httpd.apache.org)) will work.
 
 ## Caddy
@@ -24,6 +45,12 @@ cp /opt/hyperglass/.samples/Caddyfile /etc/caddy/Caddyfile
 
 Change the `lg.example.com` and `person@example.com` values to match your hyperglass FQDN and email address (the email address is for automatic SSL certificate generation via Let's Encrypt).
 
+Ensure the `reverse_proxy` target matches where hyperglass listens (default `localhost:8001`).
+
+Caddy's `reverse_proxy` sets `X-Forwarded-For` and related headers from the connecting client. Do
+**not** forward client-supplied `X-Forwarded-For` from an untrusted hop in front of Caddy without
+stripping or overwriting it first.
+
 <Callout type="info">
     If you prefer to use other Let's Encrypt validation methods or your own SSL certificate, modify
     your `/etc/hyperglass/Caddyfile` in accordance with the [Caddy
@@ -42,3 +69,15 @@ ln -s /etc/nginx/sites-available/hyperglass /etc/nginx/sites-enabled/hyperglass
 Change the `lg.example.com` value to match your hyperglass FQDN.
 
 Change the `<path to cert chain>` and `<path to key>` values to match the path to your certificate and private key files.
+
+Configure NGINX to set (not append blindly) the forwarding headers, for example:
+
+```nginx
+proxy_set_header Host $host;
+proxy_set_header X-Real-IP $remote_addr;
+proxy_set_header X-Forwarded-For $remote_addr;
+proxy_set_header X-Forwarded-Proto $scheme;
+```
+
+Using `$remote_addr` (the peer that connected to NGINX) avoids clients spoofing their own IP into
+the rate-limit bucket when NGINX is the only public hop.

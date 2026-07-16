@@ -58,15 +58,26 @@ if not STATE.settings.disable_ui:
 # Per-client rate limiting, scoped to the unauthenticated query endpoint. Each
 # query opens a live device connection, so an unthrottled flood can exhaust
 # workers and device sessions.
+#
+# The middleware resolves its store from the app store registry. Register a
+# Redis-backed store (against the Redis hyperglass already runs) so the
+# per-client counter is shared across all worker processes; without it each
+# worker keeps its own in-memory counter and the effective limit is
+# `workers * limit`.
 MIDDLEWARE = []
+STORES = {}
 RATE_LIMIT_CONFIG = STATE.params.rate_limit.to_litestar_config()
 if RATE_LIMIT_CONFIG is not None:
     MIDDLEWARE = [RATE_LIMIT_CONFIG.middleware]
+    STORES[RATE_LIMIT_CONFIG.store] = STATE.params.rate_limit.redis_store(
+        str(STATE.settings.redis_dsn)
+    )
 
 
 app = Litestar(
     route_handlers=HANDLERS,
     middleware=MIDDLEWARE,
+    stores=STORES,
     exception_handlers={
         HTTPException: http_handler,
         HyperglassError: app_handler,

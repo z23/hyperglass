@@ -13,6 +13,10 @@ services:
             - HYPERGLASS_REDIS_HOST=${HYPERGLASS_REDIS_HOST-redis}
             - HYPEGLASS_DISABLE_UI=${HYPEGLASS_DISABLE_UI-false}
             - HYPERGLASS_CONTAINER=${HYPERGLASS_CONTAINER-true}
+            # Per-client rate limit for the unauthenticated /api/query endpoint.
+            - HYPERGLASS_RATE_LIMIT=${HYPERGLASS_RATE_LIMIT-10}
+            - HYPERGLASS_RATE_LIMIT_PERIOD=${HYPERGLASS_RATE_LIMIT_PERIOD-minute}
+            - HYPERGLASS_RATE_LIMIT_ENABLE=${HYPERGLASS_RATE_LIMIT_ENABLE-true}
             - HYPERGLASS_ORIGINAL_APP_PATH=${HYPERGLASS_APP_PATH}
         build: .
         ports:

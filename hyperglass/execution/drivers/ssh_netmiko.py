@@ -8,6 +8,7 @@ import math
 from typing import Iterable
 
 # Third Party
+import anyio
 from netmiko import (  # type: ignore
     ConnectHandler,
     NetMikoTimeoutException,
@@ -40,9 +41,18 @@ class NetmikoConnection(SSHConnection):
     async def collect(self, host: str = None, port: int = None) -> Iterable:
         """Connect directly to a device.
 
-        Directly connects to the router via Netmiko library, returns the
-        command output.
+        Netmiko performs blocking, synchronous socket I/O. Running it directly
+        on the ASGI event loop would stall every other in-flight request for the
+        duration of the device interaction (up to the request timeout), so the
+        work is offloaded to a worker thread. ``abandon_on_cancel=True`` lets the
+        upstream timeout in ``execution.main.execute`` return promptly on
+        expiry; the abandoned thread is bounded by Netmiko's own ``timeout`` /
+        ``session_timeout``.
         """
+        return await anyio.to_thread.run_sync(self._collect, host, port, abandon_on_cancel=True)
+
+    def _collect(self, host: str = None, port: int = None) -> Iterable:
+        """Perform the blocking Netmiko device interaction (worker thread)."""
         params = use_state("params")
         _log = log.bind(
             device=self.device.name,

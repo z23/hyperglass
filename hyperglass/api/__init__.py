@@ -55,9 +55,18 @@ if not STATE.settings.disable_ui:
         ),
     ]
 
+# Per-client rate limiting, scoped to the unauthenticated query endpoint. Each
+# query opens a live device connection, so an unthrottled flood can exhaust
+# workers and device sessions.
+MIDDLEWARE = []
+RATE_LIMIT_CONFIG = STATE.params.rate_limit.to_litestar_config()
+if RATE_LIMIT_CONFIG is not None:
+    MIDDLEWARE = [RATE_LIMIT_CONFIG.middleware]
+
 
 app = Litestar(
     route_handlers=HANDLERS,
+    middleware=MIDDLEWARE,
     exception_handlers={
         HTTPException: http_handler,
         HyperglassError: app_handler,

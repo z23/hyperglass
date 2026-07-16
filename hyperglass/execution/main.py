@@ -7,8 +7,10 @@ http client API calls, returns the output back to the front end.
 """
 
 # Standard Library
-import signal
-from typing import TYPE_CHECKING, Any, Dict, Union, Callable
+from typing import TYPE_CHECKING, Dict, Union
+
+# Third Party
+import anyio
 
 # Project
 from hyperglass.log import log
@@ -34,15 +36,6 @@ def map_driver(driver_name: str) -> "Connection":
     return NetmikoConnection
 
 
-def handle_timeout(**exc_args: Any) -> Callable:
-    """Return a function signal can use to raise a timeout exception."""
-
-    def handler(*args: Any, **kwargs: Any) -> None:
-        raise DeviceTimeout(**exc_args)
-
-    return handler
-
-
 async def execute(query: "Query") -> Union["OutputDataModel", str]:
     """Initiate query validation and execution."""
     params = use_state("params")
@@ -53,18 +46,25 @@ async def execute(query: "Query") -> Union["OutputDataModel", str]:
     mapped_driver = map_driver(query.device.driver)
     driver: "Connection" = mapped_driver(query.device, query)
 
-    signal.signal(
-        signal.SIGALRM,
-        handle_timeout(error=TimeoutError("Connection timed out"), device=query.device),
-    )
-    signal.alarm(params.request_timeout - 1)
-
-    if query.device.proxy:
-        proxy = driver.setup_proxy()
-        with proxy() as tunnel:
-            response = await driver.collect(tunnel.local_bind_host, tunnel.local_bind_port)
-    else:
-        response = await driver.collect()
+    # Bound the whole device interaction with an async-native timeout. The
+    # blocking Netmiko driver runs in a worker thread (see NetmikoConnection),
+    # so a per-request timeout is safe here. This replaces a process-global
+    # signal.alarm() timer, which was unsound under a concurrent async server:
+    # only one alarm can be pending per process, so overlapping requests would
+    # overwrite each other's timers and the handler could fire inside an
+    # unrelated coroutine.
+    try:
+        with anyio.fail_after(params.request_timeout - 1):
+            if query.device.proxy:
+                proxy = driver.setup_proxy()
+                with proxy() as tunnel:
+                    response = await driver.collect(tunnel.local_bind_host, tunnel.local_bind_port)
+            else:
+                response = await driver.collect()
+    except TimeoutError as timeout_error:
+        raise DeviceTimeout(
+            error=TimeoutError("Connection timed out"), device=query.device
+        ) from timeout_error
 
     output = await driver.response(response)
 
@@ -84,7 +84,5 @@ async def execute(query: "Query") -> Union["OutputDataModel", str]:
         # error.
         if not output:
             raise ResponseEmpty(query=query)
-
-    signal.alarm(0)
 
     return output

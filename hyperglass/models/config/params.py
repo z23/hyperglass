@@ -20,6 +20,7 @@ from .cache import Cache
 from .logging import Logging
 from .messages import Messages
 from .structured import Structured
+from .rate_limit import RateLimit
 
 Localhost = t.Literal["localhost"]
 
@@ -87,6 +88,7 @@ class Params(ParamsPublic, HyperglassModel):
     docs: Docs = Docs()
     logging: Logging = Logging()
     messages: Messages = Messages()
+    rate_limit: RateLimit = RateLimit()
     structured: Structured = Structured()
     web: Web = Web()
 

@@ -10,6 +10,7 @@ dependencies = [
     "PyJWT==2.6.0",
     "PyYAML>=6.0",
     "aiofiles>=23.2.1",
+    "anyio>=4.3.0",
     "distro==1.8.0",
     "favicons==0.2.2",
     "httpx==0.24.0",
@@ -28,7 +29,7 @@ dependencies = [
     "toml>=0.10.2",
     "pydantic-settings>=2.2.1",
     "pydantic-extra-types>=2.6.0",
-    "litestar[standard,brotli]>=2.7.1",
+    "litestar[standard,brotli]>=2.8.3",
 ]
 readme = "README.md"
 requires-python = ">= 3.11"

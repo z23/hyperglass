@@ -38,6 +38,11 @@ from ..directive import Directive, RuleWithPattern, RuleWithIPv4
         "foo\\bar",
         "1.1.1.1 > /tmp/x",
         "1.1.1.1 < /tmp/x",
+        # Shell command/parameter substitution on linux_ssh (issue #4).
+        "$(reboot)",
+        "65000$(id)",
+        "${PATH}",
+        "65000${IFS}id",
     ],
 )
 def test_wildcard_pattern_rejects_metachars(target):
@@ -146,6 +151,11 @@ def test_pattern_rule_rejects_embedded_newline_with_strict_regex():
         "foo<bar",
         "foo>bar",
         "foo\\bar",
+        # Shell command/parameter substitution (issue #4 / linux_ssh RCE).
+        "$(reboot)",
+        "65000$(id)",
+        "${PATH}",
+        "65000${IFS}id",
     ],
 )
 def test_check_query_target_rejects_forbidden_chars(target):
@@ -156,7 +166,7 @@ def test_check_query_target_rejects_forbidden_chars(target):
 
 @pytest.mark.parametrize(
     "target",
-    ["192.0.2.0/24", "65000:100", "_65000_", "^65000$", "(65000)(65001)"],
+    ["192.0.2.0/24", "65000:100", "_65000_", "^65000$", "(65000)(65001)", "65000 .* 65001"],
 )
 def test_check_query_target_accepts_normal_targets(target):
     """Normal looking-glass targets must pass the type-level check."""
@@ -179,21 +189,36 @@ def test_query_validates_each_list_target_elementwise():
 
 
 def test_check_query_target_rejects_even_when_rule_would_permit():
-    """Layer-1 must reject metacharacters even when Layer-2 would permit them.
+    """Layer-1 rejects metacharacters; Layer-2 also hard-blocks them.
 
-    A rule with `condition='.*'` would permit anything at the directive-rule
-    layer, but `_check_query_target` runs first and must still reject.
+    A rule with `condition='.*'` would match anything by regex alone, but both
+    layers hard-block forbidden content so a custom permissive condition cannot
+    re-open the injection path.
     """
     permissive_rule = RuleWithPattern(
         condition=r".*", action="permit", commands=["show {target}"]
     )
     target = "1.1.1.1;reboot"
-    # The rule itself would happily permit this if it ever saw it...
-    # (re.fullmatch(".*") matches any string, including ones with `;`).
-    assert permissive_rule.validate_target(target, multiple=False) is True
-    # ...but the Layer-1 check that runs *before* the rule rejects it first:
+    # Layer-2 now hard-blocks forbidden content even for custom regexes:
+    assert permissive_rule.validate_target(target, multiple=False) is False
+    # Layer-1 still rejects first in the request pipeline:
     with pytest.raises(InputValidationError):
         _check_query_target(target)
+
+
+def test_shell_escape_linux_target_neutralizes_substitution():
+    """Escaped targets keep AS-path anchors but neutralize `$(…)` for bash.
+
+    After bash double-quote parsing, `\$` becomes a literal `$`, so vtysh still
+    sees `^65000$` while `$(reboot)` cannot execute.
+    """
+    # Project
+    from hyperglass.constants import shell_escape_linux_target
+
+    assert shell_escape_linux_target("^65000$") == "^65000\\$"
+    assert shell_escape_linux_target("$(reboot)") == "\\$(reboot)"
+    assert shell_escape_linux_target('a"b') == 'a\\"b'
+    assert shell_escape_linux_target("a\\b") == "a\\\\b"
 
 
 # Empty-list query target: must be rejected, never a 500. Historically an empty

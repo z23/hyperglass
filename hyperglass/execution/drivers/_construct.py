@@ -15,9 +15,11 @@ import ipaddress
 from hyperglass.log import log
 from hyperglass.util import get_fmt_keys
 from hyperglass.constants import (
+    LINUX_PLATFORMS,
     TRANSPORT_REST,
     TARGET_FORMAT_SPACE,
-    FORBIDDEN_TARGET_CHARS,
+    shell_escape_linux_target,
+    target_contains_forbidden_content,
 )
 from hyperglass.exceptions.public import InputInvalid
 from hyperglass.exceptions.private import ConfigError
@@ -34,10 +36,10 @@ if t.TYPE_CHECKING:
 FormatterCallback = t.Callable[[str], t.Union[t.List[str], str]]
 
 # Final, post-formatter defense before a target is interpolated into a device
-# command. The same `FORBIDDEN_TARGET_CHARS` set is checked at the type-level
-# boundary in `models.api.query`; running it again here means a regression in
-# either the QueryTarget constraint or a custom directive's regex still
-# cannot reach `send_command`.
+# command. The same forbidden-content check runs at the type-level boundary in
+# `models.api.query`; running it again here means a regression in either the
+# QueryTarget constraint or a custom directive's regex still cannot reach
+# `send_command`. For linux_ssh platforms the target is also shell-escaped.
 
 
 class Construct:
@@ -121,13 +123,21 @@ class Construct:
             pass
 
         target_str = str(self.target)
-        if any(c in FORBIDDEN_TARGET_CHARS for c in target_str):
+        if target_contains_forbidden_content(target_str):
             raise InputInvalid(
                 error="Target contains disallowed character(s)",
                 target=target_str,
             )
 
-        return command.format(target=self.target, mask=mask, **attrs)
+        # On linux_ssh platforms the command line is evaluated by bash. Escape
+        # shell metacharacters in the target so AS-path anchors like `$` reach
+        # the tool literally and `$(…)` cannot execute (defense in depth on
+        # top of the forbidden-substring check above).
+        target_for_cmd: t.Union[t.List[str], str] = self.target
+        if self.device.platform in LINUX_PLATFORMS and isinstance(self.target, str):
+            target_for_cmd = shell_escape_linux_target(target_str)
+
+        return command.format(target=target_for_cmd, mask=mask, **attrs)
 
     def queries(self):
         """Return queries for each enabled AFI."""

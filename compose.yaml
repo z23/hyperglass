@@ -11,7 +11,7 @@ services:
             - HYPERGLASS_DEBUG=${HYPERGLASS_DEBUG-false}
             - HYPERGLASS_DEV_MODE=${HYPERGLASS_DEV_MODE-false}
             - HYPERGLASS_REDIS_HOST=${HYPERGLASS_REDIS_HOST-redis}
-            - HYPEGLASS_DISABLE_UI=${HYPEGLASS_DISABLE_UI-false}
+            - HYPERGLASS_DISABLE_UI=${HYPERGLASS_DISABLE_UI-false}
             - HYPERGLASS_CONTAINER=${HYPERGLASS_CONTAINER-true}
             # Per-client rate limit for the unauthenticated /api/query endpoint.
             - HYPERGLASS_RATE_LIMIT=${HYPERGLASS_RATE_LIMIT-10}
@@ -19,7 +19,10 @@ services:
             - HYPERGLASS_RATE_LIMIT_ENABLE=${HYPERGLASS_RATE_LIMIT_ENABLE-true}
             - HYPERGLASS_ORIGINAL_APP_PATH=${HYPERGLASS_APP_PATH}
         build: .
+        # Bind to loopback only — put Caddy/NGINX (or another reverse proxy) in
+        # front for public HTTPS. Publishing on 0.0.0.0 would let clients spoof
+        # X-Forwarded-For and bypass rate limits; see docs/installation/reverse-proxy.
         ports:
-            - "${HYPERGLASS_PORT-8001}:${HYPERGLASS_PORT-8001}"
+            - "127.0.0.1:${HYPERGLASS_PORT-8001}:${HYPERGLASS_PORT-8001}"
         volumes:
             - ${HYPERGLASS_APP_PATH-/etc/hyperglass}:/etc/hyperglass

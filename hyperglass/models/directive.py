@@ -13,6 +13,7 @@ from hyperglass.log import log
 from hyperglass.util import get_fmt_keys
 from hyperglass.types import Series
 from hyperglass.settings import Settings
+from hyperglass.constants import target_contains_forbidden_content
 from hyperglass.exceptions.private import InputValidationError
 
 # Local
@@ -213,6 +214,11 @@ class RuleWithPattern(Rule):
     # vendor directives interpolate the target unquoted, where `|` would be
     # parsed as a CLI pipe filter rather than regex alternation. Custom
     # directives should set an explicit `condition` regex.
+    #
+    # Lone `$` / `(` / `)` are allowed for AS-path anchors and groups, but the
+    # shell substitution sequences `$(` / `${` are rejected in
+    # `validate_single_value` (and again at Layer 1 / construct) so that
+    # linux_ssh platforms cannot be RCE'd via command substitution.
     _WILDCARD_PATTERN = re.compile(
         r"[A-Za-z0-9:_\-\^\$\.\*\+\?\(\)\[\] ]+"
     )
@@ -223,6 +229,11 @@ class RuleWithPattern(Rule):
         """Validate a string target against configured regex patterns."""
 
         def validate_single_value(value: str) -> t.Union[bool, BaseException]:
+            # Reject shell substitution / CLI metacharacters even when a custom
+            # condition regex would otherwise permit them.
+            if target_contains_forbidden_content(value):
+                return False
+
             if self.condition == "*":
                 pattern = self._WILDCARD_PATTERN
             else:

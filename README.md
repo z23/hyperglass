@@ -9,9 +9,27 @@
 
 <hr/>
 
+> **Fork notice** — This is a maintained fork of [thatmattlove/hyperglass](https://github.com/thatmattlove/hyperglass) with security hardening and operational fixes for production deployments. Upstream remains the project of record for documentation and general development; use **this** repository if you want the hardened query path, rate limiting, and related bugfixes below. We do not currently open PRs upstream — divergences live here on purpose.
+>
+> **Hardening & fixes in this fork (vs upstream `main`):**
+>
+> - **Query-target validation** against CLI injection and forbidden shell metacharacters
+> - **Block `$(…)` / command substitution** on `linux_ssh` device drivers
+> - **Require a reverse proxy** in front of the app (documented + compose typo fix)
+> - **Shared Redis-backed rate limiter** for multi-worker deployments (not per-process only)
+> - **Lower default query rate limit** (10) and make it env-configurable
+> - **Litestar path-traversal CVE patch** and broader query-API DoS hardening
+> - **Reject empty target lists** with 400 instead of 500; reset stale rule state
+> - **Clean `ParsingError` surfaces** for Arista and FRR (no TypeError-masked 500s)
+> - **Webhook validator** accepts raw dict input in `mode='before'` (upstream #282)
+> - **Arista VRF-aware** builtin directives and BGP route VRF command fixes
+> - **Reproducible Docker builds** from `requirements.lock`
+>
+> Upstream docs and the live demo still apply: [hyperglass.dev](https://hyperglass.dev). File fork-specific issues against [z23/hyperglass](https://github.com/z23/hyperglass/issues).
+
 <div align="center">
 
-[**Documentation**](https://hyperglass.dev)&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;[**Live Demo**](https://demo.hyperglass.dev/)
+[**Documentation**](https://hyperglass.dev)&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;[**Live Demo**](https://demo.hyperglass.dev/)&nbsp;&nbsp;&nbsp;|&nbsp;&nbsp;&nbsp;[**Upstream**](https://github.com/thatmattlove/hyperglass)
 
 [![Frontend Tests](https://img.shields.io/github/actions/workflow/status/thatmattlove/hyperglass/frontend.yml?label=Frontend%20Tests&style=for-the-badge)](https://github.com/thatmattlove/hyperglass/actions/workflows/frontend.yml)
 [![Backend Tests](https://img.shields.io/github/actions/workflow/status/thatmattlove/hyperglass/backend.yml?label=Backend%20Tests&style=for-the-badge)](https://github.com/thatmattlove/hyperglass/actions/workflows/backend.yml)

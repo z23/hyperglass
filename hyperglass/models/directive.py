@@ -132,7 +132,10 @@ class RuleWithIP(Rule):
         """Validate an IP address target against this rule's conditions."""
 
         if isinstance(target, t.List):
-            if len(target) > 1:
+            # An IP rule accepts exactly one target. `!= 1` (rather than `> 1`)
+            # also rejects the empty list, which would otherwise reach
+            # `target[0]` below and raise an uncaught IndexError -> HTTP 500.
+            if len(target) != 1:
                 self._passed = False
                 raise InputValidationError(error="Target must be a single value", target=target)
             target = target[0]
@@ -236,6 +239,12 @@ class RuleWithPattern(Rule):
             return False
 
         if isinstance(target, t.List):
+            # An empty list has no values to match; treat it as a failed
+            # validation rather than silently passing (an empty generator
+            # below would otherwise fall through to `_passed = True`).
+            if len(target) == 0:
+                self._passed = False
+                raise InputValidationError(error="Target must not be empty", target=target)
             for result in (validate_single_value(v) for v in target):
                 if isinstance(result, BaseException):
                     self._passed = False
@@ -333,6 +342,16 @@ class Directive(HyperglassUniqueModel, unique_by=("id", "table_output")):
 
     def validate_target(self, target: str) -> bool:
         """Validate a target against all configured rules."""
+        # Clear any `_passed` state left over from a previous target. Rules
+        # persist `_passed` so `Construct.queries()` can select the matched
+        # rules across the whole rule set, but validation returns at the first
+        # matching rule and leaves later rules unevaluated — so a reused
+        # Directive instance would otherwise carry a prior target's `_passed`
+        # (e.g. building both the IPv4 and IPv6 command for one target). Reset
+        # up front rather than per-rule, since the early return means a later
+        # rule's stale flag would never be cleared on its own.
+        for rule in self.rules:
+            rule._passed = None
         for rule in self.rules:
             valid = rule.validate_target(target, multiple=self.multiple)
             if valid is True:

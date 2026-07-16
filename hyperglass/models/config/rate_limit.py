@@ -11,6 +11,7 @@ from ..main import HyperglassModel
 
 if t.TYPE_CHECKING:
     # Third Party
+    from litestar.stores.base import Store
     from litestar.middleware.rate_limit import RateLimitConfig
 
 RateLimitPeriod = t.Literal["second", "minute", "hour", "day"]
@@ -20,6 +21,12 @@ RateLimitPeriod = t.Literal["second", "minute", "hour", "day"]
 # rate limiting, so only `/api/query` is throttled (the UI, static assets, and
 # read-only info endpoints are never limited).
 RATE_LIMIT_EXCLUDE = [r"^(?!/api/query$).*"]
+
+# Name under which the rate-limit store is registered on the Litestar app. The
+# rate-limit middleware looks its store up from the app's store registry by this
+# name; `hyperglass.api` registers a Redis-backed store here so the per-client
+# counter is shared across worker processes (see `RateLimit.redis_store`).
+RATE_LIMIT_STORE_NAME = "rate_limit"
 
 
 class RateLimit(HyperglassModel):
@@ -61,4 +68,23 @@ class RateLimit(HyperglassModel):
         return RateLimitConfig(
             rate_limit=(self.period, self.limit),
             exclude=RATE_LIMIT_EXCLUDE,
+            store=RATE_LIMIT_STORE_NAME,
         )
+
+    @staticmethod
+    def redis_store(dsn: str) -> "Store":
+        """Build a Redis-backed store for the rate-limit middleware.
+
+        hyperglass runs multiple uvicorn workers in production (`cpu_count * 2`).
+        Litestar's rate-limit middleware resolves its store from the app's store
+        registry, which defaults to a per-process in-memory store; with that
+        default each worker keeps its own counter and the effective limit
+        becomes `workers * limit` (requests round-robin across workers, so the
+        configured limit is never actually enforced). Backing the store with the
+        Redis instance hyperglass already runs makes the counter shared, so the
+        configured limit holds per client across every worker.
+        """
+        # Third Party
+        from litestar.stores.redis import RedisStore
+
+        return RedisStore.with_client(url=dsn)

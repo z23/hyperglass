@@ -14,12 +14,15 @@ These tests pin the security guarantees of the input pipeline:
 # Standard Library
 import pytest
 
+# Third Party
+from pydantic import TypeAdapter, ValidationError
+
 # Project
 from hyperglass.exceptions.private import InputValidationError
-from hyperglass.models.api.query import _check_query_target
+from hyperglass.models.api.query import Query, _check_query_target
 
 # Local
-from ..directive import Directive, RuleWithPattern
+from ..directive import Directive, RuleWithPattern, RuleWithIPv4
 
 
 @pytest.mark.parametrize(
@@ -191,3 +194,72 @@ def test_check_query_target_rejects_even_when_rule_would_permit():
     # ...but the Layer-1 check that runs *before* the rule rejects it first:
     with pytest.raises(InputValidationError):
         _check_query_target(target)
+
+
+# Empty-list query target: must be rejected, never a 500. Historically an empty
+# list reached `target[0]` in `RuleWithIP` (uncaught IndexError -> HTTP 500) and
+# was silently accepted by `RuleWithPattern` (empty generator -> `_passed=True`).
+
+
+def test_query_target_field_rejects_empty_list():
+    """`query_target=[]` must fail model validation (a 400), not reach a rule.
+
+    Pins the `min_length=1` constraint on the real `Query.query_target` field
+    so an empty list is rejected at the type boundary.
+    """
+    adapter = TypeAdapter(Query.model_fields["query_target"].annotation)
+    with pytest.raises(ValidationError):
+        adapter.validate_python([])
+    # A single-value list and a bare string must still be accepted.
+    assert adapter.validate_python(["1.1.1.1"]) == ["1.1.1.1"]
+    assert adapter.validate_python("1.1.1.1") == "1.1.1.1"
+
+
+def test_ip_rule_rejects_empty_list():
+    """An empty list must raise InputValidationError, not IndexError."""
+    rule = RuleWithIPv4(
+        condition="0.0.0.0/0", ge=0, le=32, commands=["show ip bgp {target}"]
+    )
+    with pytest.raises(InputValidationError):
+        rule.validate_target([], multiple=False)
+    # A single-value list is still accepted.
+    assert rule.validate_target(["1.1.1.1"], multiple=False) is True
+
+
+def test_pattern_rule_rejects_empty_list():
+    """An empty list must be rejected, not silently validated as passing."""
+    rule = RuleWithPattern(condition="*", action="permit", commands=["show {target}"])
+    with pytest.raises(InputValidationError):
+        rule.validate_target([], multiple=False)
+    assert rule._passed is not True
+    # A populated list is still validated element-wise.
+    assert rule.validate_target(["65000", "65001"], multiple=True) is True
+
+
+def test_directive_resets_passed_state_across_targets():
+    """A reused Directive must not carry `_passed` state between targets.
+
+    Regression for the latent bug where validating an IPv6 target and then an
+    IPv4 target against one Directive instance left both rules `_passed=True`,
+    so `Construct.queries()` would build both the v4 and v6 command for the v4
+    target.
+    """
+    directive = Directive(
+        id="test",
+        name="Test",
+        field=None,
+        rules=[
+            {"condition": "0.0.0.0/0", "ge": 0, "le": 32, "command": "show ip bgp {target}"},
+            {"condition": "::/0", "ge": 0, "le": 128, "command": "show ipv6 bgp {target}"},
+        ],
+    )
+
+    directive.validate_target("2001:4860:4860::8888")
+    directive.validate_target("1.1.1.1")
+    passed = [rule._type for rule in directive.rules if rule._passed is True]
+    assert passed == ["ipv4"], f"expected only the IPv4 rule to pass, got {passed}"
+
+    # And the reverse order: a v6 target after a v4 target.
+    directive.validate_target("2001:4860:4860::8888")
+    passed = [rule._type for rule in directive.rules if rule._passed is True]
+    assert passed == ["ipv6"], f"expected only the IPv6 rule to pass, got {passed}"

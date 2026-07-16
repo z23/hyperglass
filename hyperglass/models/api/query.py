@@ -7,7 +7,7 @@ import secrets
 from datetime import datetime
 
 # Third Party
-from pydantic import BaseModel, ConfigDict, field_validator, StringConstraints
+from pydantic import Field, BaseModel, ConfigDict, field_validator, StringConstraints
 from typing_extensions import Annotated
 
 # Project
@@ -65,7 +65,10 @@ class Query(BaseModel):
     # Device `name` field
     query_location: QueryLocation
 
-    query_target: t.Union[t.List[QueryTarget], QueryTarget]
+    # `min_length=1` rejects an empty target list at model validation (a clean
+    # 400) instead of letting it reach rule validation, where it would raise an
+    # uncaught IndexError -> HTTP 500.
+    query_target: t.Union[Annotated[t.List[QueryTarget], Field(min_length=1)], QueryTarget]
 
     # Directive `id` field
     query_type: QueryType

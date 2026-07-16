@@ -7,7 +7,7 @@ from pathlib import Path
 from ipaddress import IPv4Address, IPv6Address
 
 # Third Party
-from pydantic import FilePath, ValidationInfo, field_validator
+from pydantic import FilePath, ValidationInfo, field_validator, model_validator
 from netmiko.ssh_dispatcher import CLASS_MAPPER  # type: ignore
 
 # Project
@@ -310,6 +310,26 @@ class Device(HyperglassModelWithId, extra="allow"):
     def validate_driver(cls: "Device", value: t.Optional[str], info: ValidationInfo) -> str:
         """Set the correct driver and override if supported."""
         return get_driver(info.data.get("platform"), value)
+
+    @model_validator(mode="after")
+    def validate_proxy_compatibility(self) -> "Device":
+        """Ensure an SSH proxy is not combined with settings that would break or bypass it."""
+        if self.proxy is not None:
+            if self.driver == "hyperglass_http_client":
+                raise ConfigError(
+                    "Device '{d}' uses the HTTP driver, which does not support an SSH proxy",
+                    d=self.name,
+                )
+            if "ssh_config_file" in self.driver_config:
+                # When an SSH config file yields a ProxyCommand/ProxyJump for
+                # the device, Netmiko replaces the proxy channel with it,
+                # silently bypassing the configured proxy.
+                raise ConfigError(
+                    "Device '{d}' has both 'proxy' and 'driver_config.ssh_config_file' "
+                    "configured, which conflict with each other. Remove one of the two",
+                    d=self.name,
+                )
+        return self
 
 
 class Devices(MultiModel, model=Device, unique_by="id"):

@@ -6,7 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ## [Unreleased]
 
+### Changed
+
+- SSH proxy (jump server) connections are now made with an in-process ProxyJump-equivalent mechanism: hyperglass opens a `direct-tcpip` channel through the proxy via Paramiko and hands it to Netmiko, instead of running a local SSH port-forward. The vendored `sshtunnel` module (`hyperglass/compat`) has been removed. The `proxy` configuration in `devices.yaml` is unchanged and fully backward compatible.
+- **Behavior change:** only the configured `proxy.credential` is offered when authenticating to an SSH proxy. Previously, keys from a running SSH agent or from `~/.ssh` were also tried. If you relied on that fallback, set the key explicitly via `proxy.credential.key`.
+- **Behavior change:** combining `proxy` with `driver_config.ssh_config_file` on the same device is now a configuration error, as an SSH config file yielding a `ProxyCommand`/`ProxyJump` would silently bypass the configured proxy. Configuring a `proxy` on a device that uses the HTTP driver is also now a configuration error at startup instead of a runtime failure.
+- SSH proxy details in user-facing error messages are now limited to `address:port`; previously the full proxy model (including credential username and key path) could appear in error keywords.
+
+### Added
+
+- `proxy.known_hosts_file`: optional path to an OpenSSH-format `known_hosts` file. When set, the SSH proxy's host key is strictly verified; when unset, the host key is not verified (matching previous behavior) and a warning is logged.
+
 ### Fixed
+
+- SSH proxy tunnel setup no longer performs blocking network I/O on the event loop; proxy connections are established in the same worker thread as the device connection.
+- Connection error messages (`connection_error` template) raised an internal `KeyError` instead of rendering, because the default template's `{device_name}` placeholder was never supplied. Message templates now tolerate unmatched placeholders, and `device_name` is populated.
+- A `proxy` without an explicit `platform` field was rejected at startup despite `platform` being documented as optional with a `linux_ssh` default. It is now optional as documented.
 - [#280](https://github.com/thatmattlove/hyperglass/issues/280): Fix: `condition: None` caused error in directive @Jimmy01240397
 - [#306](https://github.com/thatmattlove/hyperglass/issues/306): Fix: allow integer values in ext_community_list_raw field for Arista BGP - @cooperwinser
 - [#311](https://github.com/thatmattlove/hyperglass/issues/311): Fix: device and directive errors.

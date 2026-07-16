@@ -38,8 +38,8 @@ netmiko_device_send_args = {
 class NetmikoConnection(SSHConnection):
     """Handle a device connection via Netmiko."""
 
-    async def collect(self, host: str = None, port: int = None) -> Iterable:
-        """Connect directly to a device.
+    async def collect(self) -> Iterable:
+        """Connect to a device, optionally via its SSH proxy.
 
         Netmiko performs blocking, synchronous socket I/O. Running it directly
         on the ASGI event loop would stall every other in-flight request for the
@@ -49,14 +49,14 @@ class NetmikoConnection(SSHConnection):
         expiry; the abandoned thread is bounded by Netmiko's own ``timeout`` /
         ``session_timeout``.
         """
-        return await anyio.to_thread.run_sync(self._collect, host, port, abandon_on_cancel=True)
+        return await anyio.to_thread.run_sync(self._collect, abandon_on_cancel=True)
 
-    def _collect(self, host: str = None, port: int = None) -> Iterable:
+    def _collect(self) -> Iterable:
         """Perform the blocking Netmiko device interaction (worker thread)."""
         params = use_state("params")
         _log = log.bind(
             device=self.device.name,
-            address=f"{host}:{port}",
+            address=f"{self.device._target}:{self.device.port}",
             proxy=str(self.device.proxy.address) if self.device.proxy is not None else None,
         )
 
@@ -67,8 +67,8 @@ class NetmikoConnection(SSHConnection):
         send_args = netmiko_device_send_args.get(self.device.platform, {})
 
         driver_kwargs = {
-            "host": host or self.device._target,
-            "port": port or self.device.port,
+            "host": self.device._target,
+            "port": self.device.port,
             "device_type": self.device.get_device_type(),
             "username": self.device.credential.username,
             "global_delay_factor": 0.1,
@@ -95,22 +95,28 @@ class NetmikoConnection(SSHConnection):
                 # private key password.
                 driver_kwargs["passphrase"] = self.device.credential.password.get_secret_value()
 
-        try:
-            nm_connect_direct = ConnectHandler(**driver_kwargs)
+        responses = ()
 
-            responses = ()
+        with self.proxy_channel() as proxy_sock:
+            if proxy_sock is not None:
+                # Set after the `driver_config` spread so user-supplied driver
+                # config cannot replace the proxy channel.
+                driver_kwargs["sock"] = proxy_sock
 
-            for query in self.query:
-                raw = nm_connect_direct.send_command(query, **send_args)
-                responses += (raw,)
+            try:
+                nm_connect_direct = ConnectHandler(**driver_kwargs)
 
-            nm_connect_direct.disconnect()
+                for query in self.query:
+                    raw = nm_connect_direct.send_command(query, **send_args)
+                    responses += (raw,)
 
-        except NetMikoTimeoutException as scrape_error:
-            raise DeviceTimeout(error=scrape_error, device=self.device) from scrape_error
+                nm_connect_direct.disconnect()
 
-        except NetMikoAuthenticationException as auth_error:
-            raise AuthError(error=auth_error, device=self.device) from auth_error
+            except NetMikoTimeoutException as scrape_error:
+                raise DeviceTimeout(error=scrape_error, device=self.device) from scrape_error
+
+            except NetMikoAuthenticationException as auth_error:
+                raise AuthError(error=auth_error, device=self.device) from auth_error
 
         if not responses:
             raise ResponseEmpty(query=self.query_data)

@@ -1,13 +1,30 @@
-In cases where access to the devices is secured behind a "jump box" or other intermediary server/device, hyperglass can use SSH local port forwarding to SSH to an intermedary device first, and then to the device.
+import { Callout } from "nextra/components";
+
+In cases where access to the devices is secured behind a "jump box" or other intermediary server/device, hyperglass can connect through the intermediary first, and then to the device — equivalent to OpenSSH's `ProxyJump` (`ssh -J`). hyperglass connects to the proxy over SSH and opens a forwarded channel to the device through it; no ports are opened on the hyperglass server and no external `ssh` binary is required.
 
 ## SSH Proxy Configuration
 
-| Parameter          | Type    | Default Value | Description                                                                          |
-| :----------------- | :------ | :------------ | :----------------------------------------------------------------------------------- |
-| `proxy.address`    | String  |               | IPv4 address, IPv6 address, or hostname of SSH proxy.                                |
-| `proxy.port`       | Number  | 22            | TCP port to use for connecting to the SSH proxy.                                     |
-| `proxy.platform`   | String  | linux_ssh     | Currently, only `linux_ssh` is supported.                                            |
-| `proxy.credential` | Mapping |               | Mapping/dict of a [credential configuration](/configuration/config/credentials.mdx). |
+| Parameter                | Type    | Default Value | Description                                                                                      |
+| :----------------------- | :------ | :------------ | :----------------------------------------------------------------------------------------------- |
+| `proxy.address`          | String  |               | IPv4 address, IPv6 address, or hostname of SSH proxy.                                            |
+| `proxy.port`             | Number  | 22            | TCP port to use for connecting to the SSH proxy.                                                 |
+| `proxy.platform`         | String  | linux_ssh     | Currently, only `linux_ssh` is supported.                                                        |
+| `proxy.credential`       | Mapping |               | Mapping/dict of a [credential configuration](/configuration/config/credentials.mdx).             |
+| `proxy.known_hosts_file` | String  |               | Path to an OpenSSH-format `known_hosts` file used to verify the proxy's host key. See below.     |
+
+### Host Key Verification
+
+When `known_hosts_file` is set, the proxy's host key is strictly verified against the file's entries, and the connection is rejected on any mismatch or missing entry. When it is unset, the proxy's host key is **not verified**, and a warning is logged at startup.
+
+If the proxy listens on a port other than 22, the `known_hosts` entry must use OpenSSH's bracketed format, e.g. `[203.0.113.1]:2222 ssh-ed25519 AAAA...`.
+
+### Authentication
+
+Only the configured `proxy.credential` is offered to the proxy. Keys from an SSH agent or from `~/.ssh` are never used, even if present.
+
+<Callout type="warning">
+A device with a `proxy` cannot also set `driver_config.ssh_config_file` — an SSH config file that yields a `ProxyCommand`/`ProxyJump` would silently replace the configured proxy, so this combination is rejected at startup.
+</Callout>
 
 ### Examples
 
@@ -25,6 +42,7 @@ devices:
           credential:
               username: your proxy username
               password: your proxy password
+          known_hosts_file: /etc/hyperglass/proxy_known_hosts
 ```
 
 In the above example, the credentials `your proxy username`/`your proxy password` will be used to authenticate from the hyperglass server to the SSH proxy, and the credentials `you`/`your password` will be used to authentiate from the SSH proxy to the device.

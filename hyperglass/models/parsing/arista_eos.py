@@ -82,7 +82,10 @@ class AristaRoutePath(_AristaBase):
     timestamp: int = int(datetime.utcnow().timestamp())
     next_hop: str
     route_type: AristaRouteType
-    route_detail: t.Optional[AristaRouteDetail]
+    # BGP AS Path and BGP Community query output legitimately omits the
+    # routeDetail block, so the key must be optional *and* default to None —
+    # under pydantic v2 an Optional field without a default is still required.
+    route_detail: t.Optional[AristaRouteDetail] = None
 
 
 class AristaRouteEntry(_AristaBase):

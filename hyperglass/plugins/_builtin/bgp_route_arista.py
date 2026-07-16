@@ -79,7 +79,7 @@ def parse_arista(output: t.Sequence[str]) -> "OutputDataModel":
             _log.bind(errors=err.errors(), response=raw_preview).critical(
                 "Validation error while parsing response"
             )
-            raise ParsingError(err.errors()) from err
+            raise ParsingError(str(err.errors())) from err
 
     return result
 

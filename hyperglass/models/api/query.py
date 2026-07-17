@@ -7,7 +7,7 @@ import secrets
 from datetime import datetime
 
 # Third Party
-from pydantic import BaseModel, ConfigDict, field_validator, StringConstraints
+from pydantic import Field, BaseModel, ConfigDict, field_validator, StringConstraints
 from typing_extensions import Annotated
 
 # Project
@@ -15,7 +15,7 @@ from hyperglass.log import log
 from hyperglass.util import snake_to_camel, repr_from_attrs
 from hyperglass.state import use_state
 from hyperglass.plugins import InputPluginManager
-from hyperglass.constants import FORBIDDEN_TARGET_CHARS
+from hyperglass.constants import target_contains_forbidden_content
 from hyperglass.exceptions.public import InputInvalid, QueryTypeNotFound, QueryLocationNotFound
 from hyperglass.exceptions.private import InputValidationError
 
@@ -30,14 +30,16 @@ QueryTarget = Annotated[
 ]
 QueryType = Annotated[str, StringConstraints(strict=True, min_length=1, strip_whitespace=True)]
 
+
 def _check_query_target(value: str) -> str:
     """Reject targets containing control characters or shell/CLI metacharacters.
 
-    The forbidden set is the canonical `FORBIDDEN_TARGET_CHARS` from
-    `hyperglass.constants`; the same set is checked again at the device
-    transport boundary (`execution.drivers._construct`).
+    Uses `target_contains_forbidden_content` from `hyperglass.constants` (single
+    forbidden characters *and* shell command/parameter substitution sequences
+    like `$(…)` / `${…}`). The same check runs again at the device transport
+    boundary (`execution.drivers._construct`).
     """
-    if any(c in FORBIDDEN_TARGET_CHARS for c in value):
+    if target_contains_forbidden_content(value):
         raise InputValidationError(
             error="Target contains disallowed character(s)",
             target=value,
@@ -65,7 +67,10 @@ class Query(BaseModel):
     # Device `name` field
     query_location: QueryLocation
 
-    query_target: t.Union[t.List[QueryTarget], QueryTarget]
+    # `min_length=1` rejects an empty target list at model validation (a clean
+    # 400) instead of letting it reach rule validation, where it would raise an
+    # uncaught IndexError -> HTTP 500.
+    query_target: t.Union[Annotated[t.List[QueryTarget], Field(min_length=1)], QueryTarget]
 
     # Directive `id` field
     query_type: QueryType

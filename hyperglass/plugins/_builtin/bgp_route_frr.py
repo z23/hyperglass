@@ -58,7 +58,10 @@ def parse_frr(output: t.Sequence[str]) -> "OutputDataModel":
 
         except ValidationError as err:
             _log.critical(err)
-            raise ParsingError(err.errors()) from err
+            # Pass the ValidationError itself so PrivateHyperglassError can
+            # format it; err.errors() is a list and raises TypeError in
+            # _safe_format (same defect as #8 on Arista).
+            raise ParsingError(err) from err
 
     return result
 

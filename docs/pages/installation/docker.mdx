@@ -57,4 +57,12 @@ systemctl enable hyperglass
 systemctl start hyperglass
 ```
 
+### Put a reverse proxy in front
+
+<Callout type="warning">
+    **Required for production.** Do not expose the hyperglass application port to the public
+    internet. The stock `compose.yaml` binds to `127.0.0.1` only; terminate TLS and forward traffic
+    with Caddy (or NGINX/Apache). See [Reverse Proxy](reverse-proxy.mdx).
+</Callout>
+
 </Steps>

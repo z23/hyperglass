@@ -2,13 +2,15 @@
 
 These pin the guarantees of the rate-limit config:
 
-1. Rate limiting is enabled by default (the query endpoint is unauthenticated
-   and each request opens a live device connection).
+1. Rate limiting is enabled by default at 10/minute (the query endpoint is
+   unauthenticated and each request opens a live device connection).
 2. Only `/api/query` is limited; the UI, static assets, and read-only info
    endpoints are never throttled.
 3. Disabling rate limiting yields no config/middleware.
 4. The counter is backed by a shared store, so the configured limit holds
    across worker processes rather than being multiplied by the worker count.
+5. Values are configurable via environment variables, with the config-file
+   value taking precedence over the environment.
 """
 
 # Standard Library
@@ -28,6 +30,19 @@ from hyperglass.models.config.rate_limit import (
     RateLimit,
 )
 
+RATE_LIMIT_ENV_VARS = (
+    "HYPERGLASS_RATE_LIMIT",
+    "HYPERGLASS_RATE_LIMIT_PERIOD",
+    "HYPERGLASS_RATE_LIMIT_ENABLE",
+)
+
+
+@pytest.fixture(autouse=True)
+def _clean_rate_limit_env(monkeypatch):
+    """Ensure the ambient environment can't skew default-behavior assertions."""
+    for var in RATE_LIMIT_ENV_VARS:
+        monkeypatch.delenv(var, raising=False)
+
 
 @post("/api/query")
 async def _query() -> dict:
@@ -39,10 +54,12 @@ async def _info() -> dict:
     return {"ok": True}
 
 
-def test_rate_limit_enabled_by_default():
-    """The query endpoint must be rate limited out of the box."""
+def test_defaults():
+    """Rate limiting must be on at 10/minute out of the box."""
     rl = RateLimit()
     assert rl.enable is True
+    assert rl.period == "minute"
+    assert rl.limit == 10
     assert rl.to_litestar_config() is not None
 
 
@@ -51,9 +68,26 @@ def test_rate_limit_disabled_yields_no_config():
     assert RateLimit(enable=False).to_litestar_config() is None
 
 
+def test_env_var_overrides_default(monkeypatch):
+    """HYPERGLASS_RATE_LIMIT* environment variables configure the limit."""
+    monkeypatch.setenv("HYPERGLASS_RATE_LIMIT", "3")
+    monkeypatch.setenv("HYPERGLASS_RATE_LIMIT_PERIOD", "hour")
+    monkeypatch.setenv("HYPERGLASS_RATE_LIMIT_ENABLE", "false")
+    rl = RateLimit()
+    assert rl.limit == 3
+    assert rl.period == "hour"
+    assert rl.enable is False
+
+
+def test_config_value_takes_precedence_over_env(monkeypatch):
+    """An explicit config-file value must win over the environment variable."""
+    monkeypatch.setenv("HYPERGLASS_RATE_LIMIT", "3")
+    assert RateLimit(limit=5).limit == 5
+
+
 def test_query_endpoint_is_limited():
     """Requests to /api/query beyond the limit return HTTP 429."""
-    config = RateLimit(period="minute", limit=2).to_litestar_config()
+    config = RateLimit(limit=2).to_litestar_config()
     app = Litestar([_query, _info], middleware=[config.middleware])
 
     with TestClient(app=app) as client:
@@ -66,7 +100,7 @@ def test_query_endpoint_is_limited():
 
 def test_non_query_endpoints_are_not_limited():
     """Read-only endpoints must never be throttled, even past the limit."""
-    config = RateLimit(period="minute", limit=2).to_litestar_config()
+    config = RateLimit(limit=2).to_litestar_config()
     app = Litestar([_query, _info], middleware=[config.middleware])
 
     with TestClient(app=app) as client:
@@ -107,7 +141,7 @@ def test_redis_store_is_redis_backed():
 
 def _limited_app(store):
     """Build a minimal app whose /api/query is limited to 2/min via `store`."""
-    config = RateLimit(period="minute", limit=2).to_litestar_config()
+    config = RateLimit(limit=2).to_litestar_config()
     return Litestar([_query], middleware=[config.middleware], stores={config.store: store})
 
 

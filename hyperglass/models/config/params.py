@@ -88,7 +88,7 @@ class Params(ParamsPublic, HyperglassModel):
     docs: Docs = Docs()
     logging: Logging = Logging()
     messages: Messages = Messages()
-    rate_limit: RateLimit = RateLimit()
+    rate_limit: RateLimit = Field(default_factory=RateLimit)
     structured: Structured = Structured()
     web: Web = Web()
 

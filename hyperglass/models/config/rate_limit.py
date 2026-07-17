@@ -4,10 +4,8 @@
 import typing as t
 
 # Third Party
-from pydantic import Field
-
-# Local
-from ..main import HyperglassModel
+from pydantic import Field, AliasChoices
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 if t.TYPE_CHECKING:
     # Third Party
@@ -29,13 +27,24 @@ RATE_LIMIT_EXCLUDE = [r"^(?!/api/query$).*"]
 RATE_LIMIT_STORE_NAME = "rate_limit"
 
 
-class RateLimit(HyperglassModel):
+class RateLimit(BaseSettings):
     """Per-client rate limiting for the query API.
 
     The looking glass query endpoint is unauthenticated and each request opens a
     live connection to a network device, so it is rate limited by default to
     protect the backend and the devices from request floods.
+
+    Values may be set in the config file (`rate_limit:` in `config.yaml`) or via
+    environment variables (`HYPERGLASS_RATE_LIMIT`, `HYPERGLASS_RATE_LIMIT_PERIOD`,
+    `HYPERGLASS_RATE_LIMIT_ENABLE`). The config file takes precedence per-field,
+    then the environment variable, then the default.
     """
+
+    model_config = SettingsConfigDict(
+        env_prefix="hyperglass_rate_limit_",
+        populate_by_name=True,
+        extra="forbid",
+    )
 
     enable: bool = Field(
         True,
@@ -48,8 +57,11 @@ class RateLimit(HyperglassModel):
         description="Time window over which the request limit is applied.",
     )
     limit: int = Field(
-        60,
+        10,
         gt=0,
+        # Accept the concise `HYPERGLASS_RATE_LIMIT` env var (instead of the
+        # prefixed `..._LIMIT`) and the `limit` key in the config file.
+        validation_alias=AliasChoices("hyperglass_rate_limit", "limit"),
         title="Rate Limit",
         description="Maximum number of query requests allowed per client, per period.",
     )

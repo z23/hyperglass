@@ -20,3 +20,6 @@ Environment variables may be overridden at the command line, or by placing them 
 | `HYPERGLASS_HOST`           | string  | `[::1]`           | Address on which hyperglass listens for requests.                                                                  |
 | `HYPERGLASS_PORT`           | number  | `8001`            | TCP port on which hyperglass listens for requests.                                                                 |
 | `HYPERGLASS_CA_CERT`        | string  | —                 | Path to CA certificate file for validating HTTPS certificates. If not supplied, system CAs are used.               |
+| `HYPERGLASS_RATE_LIMIT`        | number  | `10`              | Maximum number of `/api/query` requests allowed per client, per period. Also settable as `rate_limit.limit` in `config.yaml`. |
+| `HYPERGLASS_RATE_LIMIT_PERIOD` | string  | `minute`          | Rate-limit window: `second`, `minute`, `hour`, or `day`.                                                           |
+| `HYPERGLASS_RATE_LIMIT_ENABLE` | boolean | `true`            | Enable per-client rate limiting on the unauthenticated `/api/query` endpoint.                                      |

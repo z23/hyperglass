@@ -2,6 +2,7 @@
 
 # flake8: noqa
 # Standard Library
+import json
 from pathlib import Path
 
 # Third Party
@@ -10,10 +11,11 @@ import pytest
 # Project
 from hyperglass.models.config.devices import Device
 from hyperglass.models.data.bgp_route import BGPRouteTable
+from hyperglass.exceptions.private import ParsingError
 
 # Local
 from ._fixtures import MockDevice
-from .._builtin.bgp_route_frr import BGPRoutePluginFrr
+from .._builtin.bgp_route_frr import BGPRoutePluginFrr, parse_frr
 
 DEPENDS_KWARGS = {
     "depends": [
@@ -53,3 +55,20 @@ def test_frr_route_sample():
     with SAMPLE.open("r") as file:
         sample = file.read()
     return _tester(sample)
+
+
+def test_frr_validation_error_is_parsing_error():
+    """A path that fails validation surfaces a clean ParsingError, not a TypeError.
+
+    Regression for the same bug as #8 on Arista: `ParsingError(err.errors())`
+    passed a list into `PrivateHyperglassError._safe_format`, raising TypeError
+    and masking the real validation error as an opaque 500.
+    """
+    data = json.loads(SAMPLE.read_text())
+    # Remove a required nested structure so FRRBGPTable validation fails.
+    for path in data.get("paths", []):
+        path.pop("nexthops", None)
+        path.pop("peer", None)
+
+    with pytest.raises(ParsingError):
+        parse_frr((json.dumps(data),))

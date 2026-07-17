@@ -73,7 +73,7 @@ def test_device_builtins_vrf_directive_renders_vrf_in_command():
     """The VRF built-in's command template should substitute `{vrf}`."""
     cmd = AristaBGPRouteVRF.rules[0].commands[0]
     assert cmd.format(vrf="public", target="192.0.2.0/24") == (
-        "show ip bgp vrf public 192.0.2.0/24"
+        "show ip bgp 192.0.2.0/24 vrf public"
     )
 
 

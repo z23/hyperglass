@@ -140,7 +140,7 @@ def test_redis_store_is_redis_backed():
 
 
 def _limited_app(store):
-    """A minimal app whose /api/query is limited to 2/min via `store`."""
+    """Build a minimal app whose /api/query is limited to 2/min via `store`."""
     config = RateLimit(limit=2).to_litestar_config()
     return Litestar([_query], middleware=[config.middleware], stores={config.store: store})
 

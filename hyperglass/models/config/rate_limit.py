@@ -1,10 +1,11 @@
 """Validation model for API rate-limit config."""
 
 # Standard Library
+import os
 import typing as t
 
 # Third Party
-from pydantic import Field, AliasChoices
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 if t.TYPE_CHECKING:
@@ -59,12 +60,26 @@ class RateLimit(BaseSettings):
     limit: int = Field(
         10,
         gt=0,
-        # Accept the concise `HYPERGLASS_RATE_LIMIT` env var (instead of the
-        # prefixed `..._LIMIT`) and the `limit` key in the config file.
-        validation_alias=AliasChoices("hyperglass_rate_limit", "limit"),
         title="Rate Limit",
         description="Maximum number of query requests allowed per client, per period.",
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def apply_short_limit_env(cls, data: t.Any) -> t.Any:
+        """Accept the concise `HYPERGLASS_RATE_LIMIT` env var for `limit`.
+
+        An explicit `limit` from the config file always takes precedence.
+        Implemented manually instead of via an `AliasChoices` validation alias:
+        with `extra="forbid"`, pydantic consumes only the first matching alias
+        key, so setting both the env var and the config key raised an
+        `extra_forbidden` validation error instead of applying the precedence.
+        """
+        if isinstance(data, dict) and "limit" not in data:
+            env_value = os.environ.get("HYPERGLASS_RATE_LIMIT")
+            if env_value:
+                data = {**data, "limit": env_value}
+        return data
 
     def to_litestar_config(self) -> t.Optional["RateLimitConfig"]:
         """Build a Litestar rate-limit config, or `None` when disabled.

@@ -1,7 +1,7 @@
 """User-facing/Public exceptions."""
 
 # Standard Library
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, Union, Optional
 
 # Local
 from ._common import PublicHyperglassError
@@ -12,6 +12,20 @@ if TYPE_CHECKING:
     from hyperglass.models.config.devices import Device
 
 
+def _device_error_kwargs(device: "Device") -> Dict[str, Any]:
+    """Build user-safe device error keywords.
+
+    Proxy details must never be exposed in a public error: the full `Proxy`
+    model's string representation includes the credential username and key
+    path, and even the proxy's address/port would disclose infrastructure to
+    anonymous users. Proxy-hop failures are attributed in the error text
+    ("Error via SSH proxy: ...") and detailed in server-side logs.
+    `device_name` is included because it is the key used by the default (and
+    documented) `connection_error` message template.
+    """
+    return {"device": device.name, "device_name": device.name}
+
+
 class ScrapeError(
     PublicHyperglassError,
     template="connection_error",
@@ -19,17 +33,17 @@ class ScrapeError(
 ):
     """Raised when an SSH driver error occurs."""
 
-    def __init__(self, *, error: BaseException, device: "Device"):
+    def __init__(self, *, error: Union[BaseException, str], device: "Device"):
         """Initialize parent error."""
-        super().__init__(error=str(error), device=device.name, proxy=device.proxy)
+        super().__init__(error=str(error), **_device_error_kwargs(device))
 
 
 class AuthError(PublicHyperglassError, template="authentication_error", level="danger"):
     """Raised when authentication to a device fails."""
 
-    def __init__(self, *, error: BaseException, device: "Device"):
+    def __init__(self, *, error: Union[BaseException, str], device: "Device"):
         """Initialize parent error."""
-        super().__init__(error=str(error), device=device.name, proxy=device.proxy)
+        super().__init__(error=str(error), **_device_error_kwargs(device))
 
 
 class RestError(PublicHyperglassError, template="connection_error", level="danger"):
@@ -37,15 +51,15 @@ class RestError(PublicHyperglassError, template="connection_error", level="dange
 
     def __init__(self, *, error: BaseException, device: "Device"):
         """Initialize parent error."""
-        super().__init__(error=str(error), device=device.name)
+        super().__init__(error=str(error), device=device.name, device_name=device.name)
 
 
 class DeviceTimeout(PublicHyperglassError, template="request_timeout", level="danger"):
     """Raised when the connection to a device times out."""
 
-    def __init__(self, *, error: BaseException, device: "Device"):
+    def __init__(self, *, error: Union[BaseException, str], device: "Device"):
         """Initialize parent error."""
-        super().__init__(error=str(error), device=device.name, proxy=device.proxy)
+        super().__init__(error=str(error), **_device_error_kwargs(device))
 
 
 class InvalidQuery(PublicHyperglassError, template="request_timeout"):

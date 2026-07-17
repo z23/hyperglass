@@ -15,15 +15,15 @@ if TYPE_CHECKING:
 def _device_error_kwargs(device: "Device") -> Dict[str, Any]:
     """Build user-safe device error keywords.
 
-    The full `Proxy` model must never be exposed in a public error, as its
-    string representation includes the credential username and key path.
+    Proxy details must never be exposed in a public error: the full `Proxy`
+    model's string representation includes the credential username and key
+    path, and even the proxy's address/port would disclose infrastructure to
+    anonymous users. Proxy-hop failures are attributed in the error text
+    ("Error via SSH proxy: ...") and detailed in server-side logs.
     `device_name` is included because it is the key used by the default (and
     documented) `connection_error` message template.
     """
-    kwargs: Dict[str, Any] = {"device": device.name, "device_name": device.name}
-    if device.proxy is not None:
-        kwargs["proxy"] = f"{device.proxy.address}:{device.proxy.port}"
-    return kwargs
+    return {"device": device.name, "device_name": device.name}
 
 
 class ScrapeError(

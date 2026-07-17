@@ -18,6 +18,12 @@ from ..util import check_legacy_fields
 from .credential import Credential
 
 
+# Proxies for which the disabled-host-key-verification warning has been
+# logged, keyed by `address:port`. Deduplicates the warning across devices
+# sharing a proxy and across pydantic's repeated validation passes.
+_HOST_KEY_WARNED: t.Set[str] = set()
+
+
 class Proxy(HyperglassModel):
     """Validation model for per-proxy config in devices.yaml."""
 
@@ -28,9 +34,9 @@ class Proxy(HyperglassModel):
     known_hosts_file: t.Optional[FilePath] = None
 
     def __init__(self: "Proxy", **kwargs: t.Any) -> None:
-        """Check for legacy fields."""
+        """Check for legacy fields & convert host paths to container paths."""
         kwargs = check_legacy_fields(model="Proxy", data=kwargs)
-        super().__init__(**kwargs)
+        super().__init__(**self.convert_paths(kwargs))
 
     @property
     def _target(self):
@@ -63,8 +69,10 @@ class Proxy(HyperglassModel):
 
     @model_validator(mode="after")
     def warn_unverified_host_key(self) -> "Proxy":
-        """Warn when the proxy's host key will not be verified."""
-        if self.known_hosts_file is None:
+        """Warn, once per unique proxy, when its host key will not be verified."""
+        key = f"{self.address}:{self.port}"
+        if self.known_hosts_file is None and key not in _HOST_KEY_WARNED:
+            _HOST_KEY_WARNED.add(key)
             log.bind(proxy=str(self.address)).warning(
                 "Proxy host key verification is disabled. Set 'known_hosts_file' "
                 "on the proxy to enable it"

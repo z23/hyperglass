@@ -12,15 +12,16 @@ from hyperglass.state.hooks import _use_state
 
 
 @pytest.fixture(autouse=True)
-def clear_state_cache() -> None:
-    """Clear the `use_state` lru_cache before each test.
+def clear_state_cache() -> t.Generator[None, None, None]:
+    """Clear the `use_state` lru_cache around each test.
 
     `use_state` caches the first value read for each state attribute for the
     life of the process; without clearing it, state written by this module's
-    fixtures is invisible when other test modules populated the cache first.
-    The cache is deliberately not cleared on teardown: several later test
-    modules implicitly rely on a warm state cache.
+    fixtures is invisible when other test modules populated the cache first,
+    and state cached here would leak into later modules.
     """
+    _use_state.cache_clear()
+    yield
     _use_state.cache_clear()
 
 

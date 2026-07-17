@@ -69,9 +69,10 @@ class HyperglassError(Exception):
                 else:
                     kwargs[key] = str(kwargs[key])
             return template.format(**kwargs)
-        except (KeyError, ValueError, IndexError):
+        except Exception:  # noqa: BLE001
             # A message that cannot be formatted (e.g. one containing raw
-            # output with braces) must never raise inside error handling.
+            # output with braces, or a template using attribute/index access
+            # on a keyword) must never raise inside error handling.
             return template
 
     def _parse_pydantic_errors(*errors: Dict[str, Any]) -> str:

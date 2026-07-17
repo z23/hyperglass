@@ -5,6 +5,7 @@ import typing as t
 
 # Third Party
 import pytest
+from netmiko.exceptions import ReadTimeout  # type: ignore
 
 # Project
 from hyperglass.state import use_state
@@ -13,6 +14,7 @@ from hyperglass.configuration import init_ui_params
 from hyperglass.models.directive import Directives
 from hyperglass.models.config.params import Params
 from hyperglass.models.config.devices import Devices
+from hyperglass.exceptions.public import DeviceTimeout
 
 # Local
 from .. import ssh_netmiko
@@ -82,14 +84,19 @@ def state() -> t.Generator["HyperglassState", None, None]:
 
 @pytest.fixture
 def fake_netmiko(monkeypatch: pytest.MonkeyPatch) -> t.Dict[str, t.Any]:
-    """Replace Netmiko's ConnectHandler with a recording fake."""
-    record: t.Dict[str, t.Any] = {}
+    """Replace Netmiko's ConnectHandler with a recording fake.
+
+    Set `record["send_exc"]` to make `send_command` raise.
+    """
+    record: t.Dict[str, t.Any] = {"send_exc": None, "disconnected": False}
 
     class FakeNetmikoSession:
         def __init__(self, **kwargs):
             record["kwargs"] = kwargs
 
         def send_command(self, command, **kwargs):
+            if record["send_exc"] is not None:
+                raise record["send_exc"]
             return f"output: {command}"
 
         def disconnect(self):
@@ -146,3 +153,27 @@ def test_driver_config_cannot_override_sock(state, fake_paramiko, fake_netmiko):
 
     (client,) = fake_paramiko["clients"]
     assert fake_netmiko["kwargs"]["sock"] is client.channel
+
+
+def test_read_timeout_classified_and_session_disconnected(state, fake_paramiko, fake_netmiko):
+    """Netmiko raises send_command read timeouts as ReadTimeout, not NetmikoTimeoutException."""
+    fake_netmiko["send_exc"] = ReadTimeout("Pattern not detected")
+    device = state.devices["proxied1"]
+    connection = NetmikoConnection(device, make_query("proxied1"))
+
+    with pytest.raises(DeviceTimeout):
+        connection._collect()
+
+    # The device session is disconnected and the proxy client closed even on
+    # failure paths.
+    assert fake_netmiko["disconnected"] is True
+    assert fake_paramiko["clients"][0].closed is True
+
+
+def test_session_disconnected_on_success(state, fake_paramiko, fake_netmiko):
+    device = state.devices["direct1"]
+    connection = NetmikoConnection(device, make_query("direct1"))
+
+    connection._collect()
+
+    assert fake_netmiko["disconnected"] is True

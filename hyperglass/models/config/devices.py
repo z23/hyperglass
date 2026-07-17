@@ -329,6 +329,17 @@ class Device(HyperglassModelWithId, extra="allow"):
                     "configured, which conflict with each other. Remove one of the two",
                     d=self.name,
                 )
+            # Netmiko ignores the proxy channel for telnet device types and
+            # connects to the device directly, silently bypassing the proxy.
+            effective_device_type = str(
+                self.driver_config.get("device_type", self.get_device_type())
+            )
+            if "_telnet" in self.platform or "_telnet" in effective_device_type:
+                raise ConfigError(
+                    "Device '{d}' uses a telnet device type, which does not support an "
+                    "SSH proxy",
+                    d=self.name,
+                )
         return self
 
 

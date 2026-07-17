@@ -1,6 +1,7 @@
 """Common Classes or Utilities for SSH Drivers."""
 
 # Standard Library
+import time
 import typing as t
 from contextlib import contextmanager
 
@@ -20,9 +21,27 @@ if t.TYPE_CHECKING:
     from hyperglass.models.config.proxy import Proxy
 
 
-def _proxy_error(proxy: "Proxy", error: BaseException) -> str:
-    """Attribute an error to the SSH proxy hop, not the device."""
-    return f"Error via SSH proxy {proxy.address}:{proxy.port}: {error}"
+def _proxy_error(error: t.Union[BaseException, str]) -> str:
+    """Attribute an error to the SSH proxy hop, not the device.
+
+    The proxy's address is deliberately omitted: this string is rendered in
+    public API error responses. Full details are logged server-side.
+    """
+    return f"Error via SSH proxy: {error}"
+
+
+def _is_timeout_message(message: str) -> bool:
+    """Determine whether a paramiko error message describes a timeout.
+
+    paramiko reports several timeout conditions as generic exceptions:
+    channel-open timeouts as ``SSHException("Timeout opening channel.")``,
+    authentication timeouts as ``AuthenticationException("Authentication
+    timeout.")``, and banner timeouts as ``SSHException("Error reading SSH
+    protocol banner")`` with the empty string representation of the
+    underlying ``socket.timeout`` appended.
+    """
+    message = message.lower()
+    return "timeout" in message or message.endswith("banner") or "no existing session" in message
 
 
 def _proxy_connect_kwargs(proxy: "Proxy", timeout: int) -> t.Dict[str, t.Any]:
@@ -73,60 +92,71 @@ class SSHConnection(Connection):
         # Keep each stage of the proxy connection within the overall request
         # budget, equivalent to the previous tunnel's `gateway_timeout`.
         timeout = max(params.request_timeout - 2, 1)
+        # Wall-clock deadline so the channel open only gets whatever budget
+        # the connect phases left over.
+        deadline = time.monotonic() + timeout
         _log = log.bind(device=self.device.name, proxy=str(proxy.address))
 
         client = paramiko.SSHClient()
-        if proxy.known_hosts_file is not None:
-            client.load_host_keys(proxy.known_hosts_file.as_posix())
-            client.set_missing_host_key_policy(paramiko.RejectPolicy())
-        else:
-            # Matches the historical behavior of the vendored sshtunnel-based
-            # proxy, which never verified the proxy's host key. Opt in to
-            # verification by setting `known_hosts_file` on the proxy.
-            client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # noqa: S507
 
         try:
             try:
+                if proxy.known_hosts_file is not None:
+                    client.load_host_keys(proxy.known_hosts_file.as_posix())
+                    client.set_missing_host_key_policy(paramiko.RejectPolicy())
+                else:
+                    # Matches the historical behavior of the vendored
+                    # sshtunnel-based proxy, which never verified the proxy's
+                    # host key. Opt in to verification by setting
+                    # `known_hosts_file` on the proxy.
+                    client.set_missing_host_key_policy(paramiko.AutoAddPolicy())  # noqa: S507
+
                 client.connect(**_proxy_connect_kwargs(proxy, timeout))
                 channel = client.get_transport().open_channel(
                     "direct-tcpip",
                     dest_addr=(self.device._target, self.device.port),
                     src_addr=("", 0),
-                    timeout=timeout,
+                    timeout=max(deadline - time.monotonic(), 1),
                 )
             except paramiko.AuthenticationException as auth_error:
+                # paramiko raises authentication-phase timeouts as
+                # AuthenticationException("Authentication timeout.").
+                if _is_timeout_message(str(auth_error)):
+                    _log.error("Timed out authenticating to SSH proxy")
+                    raise DeviceTimeout(
+                        error=_proxy_error(auth_error), device=self.device
+                    ) from auth_error
                 _log.error("Authentication to SSH proxy failed")
-                raise AuthError(
-                    error=_proxy_error(proxy, auth_error), device=self.device
-                ) from auth_error
+                raise AuthError(error=_proxy_error(auth_error), device=self.device) from auth_error
             except paramiko.ChannelException as channel_error:
                 # The proxy refused or failed to open a connection to the device.
                 _log.error("SSH proxy could not open a connection to the device")
                 raise ScrapeError(
-                    error=_proxy_error(proxy, channel_error), device=self.device
+                    error=_proxy_error(channel_error), device=self.device
                 ) from channel_error
             except TimeoutError as timeout_error:
                 _log.error("Timed out connecting to SSH proxy")
                 raise DeviceTimeout(
-                    error=_proxy_error(proxy, timeout_error), device=self.device
+                    error=_proxy_error(timeout_error), device=self.device
                 ) from timeout_error
             except paramiko.SSHException as ssh_error:
                 # Covers host key verification failures, transport errors, and
-                # channel-open timeouts (which paramiko raises as SSHException).
-                if "timeout" in str(ssh_error).lower():
-                    _log.error("Timed out opening a channel through SSH proxy")
+                # the timeout conditions paramiko raises as generic
+                # SSHExceptions (channel-open and banner timeouts).
+                if _is_timeout_message(str(ssh_error)):
+                    _log.error("Timed out connecting via SSH proxy")
                     raise DeviceTimeout(
-                        error=_proxy_error(proxy, ssh_error), device=self.device
+                        error=_proxy_error(ssh_error), device=self.device
                     ) from ssh_error
                 _log.error("Failed to connect to device via SSH proxy")
-                raise ScrapeError(
-                    error=_proxy_error(proxy, ssh_error), device=self.device
-                ) from ssh_error
+                raise ScrapeError(error=_proxy_error(ssh_error), device=self.device) from ssh_error
             except OSError as os_error:
-                _log.error("Failed to connect to SSH proxy")
-                raise ScrapeError(
-                    error=_proxy_error(proxy, os_error), device=self.device
-                ) from os_error
+                # OSError strings can embed local file paths (e.g. a missing
+                # key file); log the full detail server-side and expose only
+                # the error class/description publicly.
+                _log.bind(error=str(os_error)).error("Failed to connect to SSH proxy")
+                detail = os_error.strerror or os_error.__class__.__name__
+                raise ScrapeError(error=_proxy_error(detail), device=self.device) from os_error
             yield channel
         finally:
             # Closing the client closes its transport and any open channels.

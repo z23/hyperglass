@@ -11,7 +11,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - SSH proxy (jump server) connections are now made with an in-process ProxyJump-equivalent mechanism: hyperglass opens a `direct-tcpip` channel through the proxy via Paramiko and hands it to Netmiko, instead of running a local SSH port-forward. The vendored `sshtunnel` module (`hyperglass/compat`) has been removed. The `proxy` configuration in `devices.yaml` is unchanged and fully backward compatible.
 - **Behavior change:** only the configured `proxy.credential` is offered when authenticating to an SSH proxy. Previously, keys from a running SSH agent or from `~/.ssh` were also tried. If you relied on that fallback, set the key explicitly via `proxy.credential.key`.
 - **Behavior change:** combining `proxy` with `driver_config.ssh_config_file` on the same device is now a configuration error, as an SSH config file yielding a `ProxyCommand`/`ProxyJump` would silently bypass the configured proxy. Configuring a `proxy` on a device that uses the HTTP driver is also now a configuration error at startup instead of a runtime failure.
-- SSH proxy details in user-facing error messages are now limited to `address:port`; previously the full proxy model (including credential username and key path) could appear in error keywords.
+- **Behavior change:** configuring a `proxy` on a telnet device is now a configuration error. Netmiko ignores the proxy channel for telnet and would connect to the device directly, silently bypassing the proxy. (Previously, telnet traffic was forwarded through the local tunnel.)
+- User-facing error messages no longer include any SSH proxy details; previously the full proxy model (including credential username and key path) could appear in error keywords. Proxy-hop failures are attributed as "Error via SSH proxy" in the message, with details available in server-side logs.
 
 ### Added
 
@@ -20,8 +21,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ### Fixed
 
 - SSH proxy tunnel setup no longer performs blocking network I/O on the event loop; proxy connections are established in the same worker thread as the device connection.
-- Connection error messages (`connection_error` template) raised an internal `KeyError` instead of rendering, because the default template's `{device_name}` placeholder was never supplied. Message templates now tolerate unmatched placeholders, and `device_name` is populated.
+- Connection error messages (`connection_error` template) raised an internal `KeyError` instead of rendering, because the default template's `{device_name}` placeholder was never supplied. Message templates now tolerate unmatched placeholders (and never raise while formatting), and `device_name` is populated.
 - A `proxy` without an explicit `platform` field was rejected at startup despite `platform` being documented as optional with a `linux_ssh` default. It is now optional as documented.
+- Device sessions are now always disconnected when a query fails mid-session; previously a failed `send_command` leaked the authenticated SSH session. Netmiko `ReadTimeout` errors are now reported as a request timeout instead of an unclassified internal error.
 - [#280](https://github.com/thatmattlove/hyperglass/issues/280): Fix: `condition: None` caused error in directive @Jimmy01240397
 - [#306](https://github.com/thatmattlove/hyperglass/issues/306): Fix: allow integer values in ext_community_list_raw field for Arista BGP - @cooperwinser
 - [#311](https://github.com/thatmattlove/hyperglass/issues/311): Fix: device and directive errors.

@@ -10,11 +10,17 @@ In cases where access to the devices is secured behind a "jump box" or other int
 | `proxy.port`             | Number  | 22            | TCP port to use for connecting to the SSH proxy.                                                 |
 | `proxy.platform`         | String  | linux_ssh     | Currently, only `linux_ssh` is supported.                                                        |
 | `proxy.credential`       | Mapping |               | Mapping/dict of a [credential configuration](/configuration/config/credentials.mdx).             |
-| `proxy.known_hosts_file` | String  |               | Path to an OpenSSH-format `known_hosts` file used to verify the proxy's host key. See below.     |
+| `proxy.known_hosts_file` | String  |               | Path to an existing OpenSSH-format `known_hosts` file used to verify the proxy's host key. See below. |
+
+<Callout type="info">
+SSH proxies are supported for SSH-based platforms only. Devices using a telnet platform (or a telnet `device_type` override) cannot use a proxy, and this combination is rejected at startup.
+</Callout>
 
 ### Host Key Verification
 
 When `known_hosts_file` is set, the proxy's host key is strictly verified against the file's entries, and the connection is rejected on any mismatch or missing entry. When it is unset, the proxy's host key is **not verified**, and a warning is logged at startup.
+
+The file must already exist when hyperglass starts — if `known_hosts_file` points to a path that does not exist, configuration validation fails and hyperglass will not start.
 
 If the proxy listens on a port other than 22, the `known_hosts` entry must use OpenSSH's bracketed format, e.g. `[203.0.113.1]:2222 ssh-ed25519 AAAA...`.
 

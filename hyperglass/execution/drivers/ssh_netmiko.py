@@ -14,6 +14,7 @@ from netmiko import (  # type: ignore
     NetMikoTimeoutException,
     NetMikoAuthenticationException,
 )
+from netmiko.exceptions import ReadException  # type: ignore
 
 # Project
 from hyperglass.log import log
@@ -46,7 +47,8 @@ class NetmikoConnection(SSHConnection):
         duration of the device interaction (up to the request timeout), so the
         work is offloaded to a worker thread. ``abandon_on_cancel=True`` lets the
         upstream timeout in ``execution.main.execute`` return promptly on
-        expiry; the abandoned thread is bounded by Netmiko's own ``timeout`` /
+        expiry; the abandoned thread is bounded by the SSH proxy stage timeouts
+        (when a proxy is configured) plus Netmiko's own ``timeout`` /
         ``session_timeout``.
         """
         return await anyio.to_thread.run_sync(self._collect, abandon_on_cancel=True)
@@ -95,30 +97,48 @@ class NetmikoConnection(SSHConnection):
                 # private key password.
                 driver_kwargs["passphrase"] = self.device.credential.password.get_secret_value()
 
-        responses = ()
-
         with self.proxy_channel() as proxy_sock:
             if proxy_sock is not None:
                 # Set after the `driver_config` spread so user-supplied driver
                 # config cannot replace the proxy channel.
                 driver_kwargs["sock"] = proxy_sock
 
-            try:
-                nm_connect_direct = ConnectHandler(**driver_kwargs)
-
-                for query in self.query:
-                    raw = nm_connect_direct.send_command(query, **send_args)
-                    responses += (raw,)
-
-                nm_connect_direct.disconnect()
-
-            except NetMikoTimeoutException as scrape_error:
-                raise DeviceTimeout(error=scrape_error, device=self.device) from scrape_error
-
-            except NetMikoAuthenticationException as auth_error:
-                raise AuthError(error=auth_error, device=self.device) from auth_error
+            responses = self._run_queries(driver_kwargs, send_args)
 
         if not responses:
             raise ResponseEmpty(query=self.query_data)
+
+        return responses
+
+    def _run_queries(self, driver_kwargs: dict, send_args: dict) -> Iterable:
+        """Run this connection's queries over a Netmiko session, always disconnecting."""
+        session = None
+        responses = ()
+
+        try:
+            session = ConnectHandler(**driver_kwargs)
+
+            for query in self.query:
+                raw = session.send_command(query, **send_args)
+                responses += (raw,)
+
+        except NetMikoTimeoutException as scrape_error:
+            raise DeviceTimeout(error=scrape_error, device=self.device) from scrape_error
+
+        except ReadException as read_error:
+            # Netmiko raises `send_command` read timeouts as ReadTimeout
+            # (a ReadException), not as NetMikoTimeoutException.
+            raise DeviceTimeout(error=read_error, device=self.device) from read_error
+
+        except NetMikoAuthenticationException as auth_error:
+            raise AuthError(error=auth_error, device=self.device) from auth_error
+
+        finally:
+            if session is not None:
+                try:
+                    session.disconnect()
+                except Exception:  # noqa: BLE001
+                    # Never let disconnect cleanup mask the real error.
+                    log.bind(device=self.device.name).debug("Error disconnecting from device")
 
         return responses

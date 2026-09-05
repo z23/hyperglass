@@ -1,3 +1,8 @@
+# Native backend: set FORWARDED_ALLOW_IPS=::1 in the hyperglass process
+# environment, not Caddy's. The sample native systemd service sets this default.
+# For Docker's published port, use 127.0.0.1:8001 below and set
+# FORWARDED_ALLOW_IPS to the container-visible proxy peer in Compose.
+# See docs/pages/installation/reverse-proxy.mdx for both startup paths.
 lg.example.com:443 {
     tls person@example.com
     file_server {
@@ -10,5 +15,5 @@ lg.example.com:443 {
         file_server /images {
             root /etc/hyperglass/static/images
         }
-    reverse_proxy localhost:8001
+    reverse_proxy [::1]:8001
 }

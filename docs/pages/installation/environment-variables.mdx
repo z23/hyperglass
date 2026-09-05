@@ -5,7 +5,10 @@ description: hyperglass environment variables
 
 There are some configuration variables that must be supplied before hyperglass can start or read its configuration files. Most of the time, you should not need to modify these.
 
-Environment variables may be overridden at the command line, or by placing them in `${HYPERGLASS_APP_PATH}/hyperglass.env`.
+Supply environment variables in the shell that starts hyperglass. The sample
+systemd units also load `/etc/hyperglass/hyperglass.env` using `EnvironmentFile`.
+Direct launches do not automatically load that file; direct Compose commands can
+load it with `--env-file /etc/hyperglass/hyperglass.env`.
 
 | Variable Name               | Type    | Default           | Description                                                                                                        |
 | :-------------------------- | :------ | :---------------- | :----------------------------------------------------------------------------------------------------------------- |
@@ -23,3 +26,4 @@ Environment variables may be overridden at the command line, or by placing them 
 | `HYPERGLASS_RATE_LIMIT`        | number  | `10`              | Maximum number of `/api/query` requests allowed per client, per period. Also settable as `rate_limit.limit` in `config.yaml`. |
 | `HYPERGLASS_RATE_LIMIT_PERIOD` | string  | `minute`          | Rate-limit window: `second`, `minute`, `hour`, or `day`.                                                           |
 | `HYPERGLASS_RATE_LIMIT_ENABLE` | boolean | `true`            | Enable per-client rate limiting on the unauthenticated `/api/query` endpoint.                                      |
+| `FORWARDED_ALLOW_IPS` | string | `127.0.0.1` (Uvicorn); `::1` in the native systemd sample | Exact proxy peers trusted to supply client addresses. Use `::1` for the native IPv6-loopback samples; configure the container-visible peer for Docker. Empty trusts no proxy. See [Reverse Proxy](reverse-proxy.mdx). |

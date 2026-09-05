@@ -26,9 +26,12 @@ device. A reverse proxy gives you:
 The stock `compose.yaml` publishes hyperglass on `127.0.0.1` only so it is not world-reachable
 by default. Point Caddy (or another proxy) at that local port.
 
-Set `FORWARDED_ALLOW_IPS` to the exact proxy peer address seen by Uvicorn (its
-default is `127.0.0.1`). Docker and IPv6 loopback deployments may use a different
-peer address. Do not use `*` or trust public client addresses. An untrusted proxy
+Set `FORWARDED_ALLOW_IPS` in the **hyperglass process environment**, not the proxy's,
+to the exact proxy peer address seen by Uvicorn (its default is `127.0.0.1`).
+The native examples below use `::1`; Docker requires a container-visible peer.
+Use unbracketed IP addresses, not hostnames or CIDR ranges, with the pinned Uvicorn
+version. Multiple exact peers can be comma-separated. Do not use `*` or trust
+public client addresses. An untrusted proxy
 will cause its clients to share one rate-limit budget; an overly broad trust list
 can let clients spoof their identity. Check this setting against your actual
 network path before rollout, including any CDN or load balancer in front.
@@ -63,7 +66,25 @@ cp /opt/hyperglass/.samples/Caddyfile /etc/caddy/Caddyfile
 
 Change the `lg.example.com` and `person@example.com` values to match your hyperglass FQDN and email address (the email address is for automatic SSL certificate generation via Let's Encrypt).
 
-Ensure the `reverse_proxy` target matches where hyperglass listens (default `localhost:8001`).
+The native sample uses `reverse_proxy [::1]:8001`, matching hyperglass's default
+IPv6-loopback listener. Pair it with this setting in the **hyperglass** service's
+`/etc/hyperglass/hyperglass.env`:
+
+```ini
+FORWARDED_ALLOW_IPS=::1
+```
+
+The sample native systemd unit supplies this default, and its `EnvironmentFile`
+can override it. Restart the hyperglass service after changing the environment.
+For a direct launch without systemd, set it in the shell instead:
+
+```shell
+FORWARDED_ALLOW_IPS=::1 hyperglass start
+```
+
+Direct launches do not automatically load `hyperglass.env`. For Docker, change
+the Caddy upstream to `127.0.0.1:8001` and follow the [Docker proxy trust](#docker-proxy-trust)
+instructions below; do not reuse `::1` for a Docker bridge peer.
 
 Caddy's `reverse_proxy` sets `X-Forwarded-For` and related headers from the connecting client. Do
 **not** forward client-supplied `X-Forwarded-For` from an untrusted hop in front of Caddy without
@@ -88,6 +109,20 @@ Change the `lg.example.com` value to match your hyperglass FQDN.
 
 Change the `<path to cert chain>` and `<path to key>` values to match the path to your certificate and private key files.
 
+The native sample uses `proxy_pass http://[::1]:8001`. Set the matching trust value
+in the **hyperglass** service's `/etc/hyperglass/hyperglass.env`, not the NGINX
+configuration:
+
+```ini
+FORWARDED_ALLOW_IPS=::1
+```
+
+The sample native systemd unit supplies the same default. Restart hyperglass
+after changing its environment. For a direct launch, use
+`FORWARDED_ALLOW_IPS=::1 hyperglass start` instead. If you change the upstream to
+IPv4 loopback, use `127.0.0.1` as the trusted peer. For Docker's published port,
+use `proxy_pass http://127.0.0.1:8001` and [configure Docker proxy trust](#docker-proxy-trust).
+
 Configure NGINX to set (not append blindly) the forwarding headers, for example:
 
 ```nginx
@@ -99,3 +134,40 @@ proxy_set_header X-Forwarded-Proto $scheme;
 
 Using `$remote_addr` (the peer that connected to NGINX) avoids clients spoofing their own IP into
 the rate-limit bucket when NGINX is the only public hop.
+
+## Docker proxy trust
+
+For a proxy running on the Docker host, use the published `127.0.0.1:8001` port
+as the Caddy/NGINX upstream. That address is **not necessarily the source address
+seen by hyperglass inside the container**. Set `FORWARDED_ALLOW_IPS` to the exact
+container-visible proxy peer, which can be a Docker bridge address. Determine it
+from the connection's peer address inside the container, not from a request's
+`X-Forwarded-For` header, and do not assume a particular bridge address.
+
+Add the following to `/etc/hyperglass/hyperglass.env`, replacing the placeholder
+with the verified peer:
+
+```ini
+FORWARDED_ALLOW_IPS=<container-visible-proxy-ip>
+```
+
+The Compose file forwards this setting into the hyperglass container. When using
+the sample Docker systemd unit, its `EnvironmentFile` supplies the value to
+Compose. When invoking Compose directly, load the file explicitly:
+
+```shell
+docker compose --env-file /etc/hyperglass/hyperglass.env up -d
+```
+
+Alternatively, export `FORWARDED_ALLOW_IPS` in the shell that runs Compose.
+Recreate the hyperglass container with `docker compose up -d` (using the same
+environment source) after changing the value; restarting an existing container
+alone does not update its environment. You can check the configured value with:
+
+```shell
+docker compose exec hyperglass printenv FORWARDED_ALLOW_IPS
+```
+
+If unset, Compose preserves Uvicorn's `127.0.0.1` default; this is not a working
+proxy-trust setting for a bridge peer. An explicitly empty value trusts no proxy.
+Keep the published application port loopback-only and never use `*` as a shortcut.

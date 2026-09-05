@@ -20,9 +20,13 @@ import uuid
 import shutil
 import asyncio
 import subprocess
+from pathlib import Path
+from configparser import ConfigParser
 
 # Third Party
 import pytest
+import yaml
+from uvicorn import Config
 from httpx import AsyncClient, ASGITransport
 from redis import Redis
 from redis.exceptions import ConnectionError as RedisConnectionError
@@ -278,12 +282,18 @@ def test_path_aliases_share_budget(store_factory):
 
 @pytest.mark.asyncio
 @pytest.mark.parametrize("trusted", [False, True])
-async def test_uvicorn_proxy_trust_preserves_client_budgets(store_factory, trusted):
+@pytest.mark.parametrize("proxy_peer", ["127.0.0.1", "::1", "172.18.0.1"])
+async def test_uvicorn_proxy_trust_preserves_client_budgets(
+    store_factory, monkeypatch, trusted, proxy_peer
+):
     store = store_factory()
-    app = ProxyHeadersMiddleware(_limited_app(store), trusted_hosts=["10.0.0.1"] if trusted else [])
+    monkeypatch.setenv("FORWARDED_ALLOW_IPS", proxy_peer if trusted else "")
+    application = _limited_app(store)
+    config = Config(app=application, log_config=None)
+    app = ProxyHeadersMiddleware(application, trusted_hosts=config.forwarded_allow_ips)
     try:
         async with AsyncClient(
-            transport=ASGITransport(app=app, client=("10.0.0.1", 1234)),
+            transport=ASGITransport(app=app, client=(proxy_peer, 1234)),
             base_url="http://testserver",
         ) as client:
             responses = [
@@ -300,6 +310,27 @@ async def test_uvicorn_proxy_trust_preserves_client_budgets(store_factory, trust
             assert different_client.status_code == (201 if trusted else 429)
     finally:
         await store._shutdown()
+
+
+def test_native_proxy_samples_match_service_trust(monkeypatch):
+    """Keep the checked-in proxy upstreams and native service trust paired."""
+    samples = Path(__file__).resolve().parents[3] / ".samples"
+    service = ConfigParser(interpolation=None)
+    service.read(samples / "hyperglass-manual.service")
+    variable, peer = service["Service"]["Environment"].strip('"').split("=", 1)
+    assert variable == "FORWARDED_ALLOW_IPS"
+    assert peer == "::1"
+    monkeypatch.setenv(variable, peer)
+    assert Config(app=_query, log_config=None).forwarded_allow_ips == peer
+    assert "reverse_proxy [::1]:8001" in (samples / "Caddyfile").read_text()
+    assert "proxy_pass http://[::1]:8001;" in (samples / "hyperglass.nginx").read_text()
+    assert service["Service"]["EnvironmentFile"] == "/etc/hyperglass/hyperglass.env"
+
+
+def test_compose_passes_proxy_trust_without_overriding_explicit_empty_values():
+    compose = Path(__file__).resolve().parents[3] / "compose.yaml"
+    environment = yaml.safe_load(compose.read_text())["services"]["hyperglass"]["environment"]
+    assert "FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS-127.0.0.1}" in environment
 
 
 def test_redis_failure_does_not_admit_a_query(monkeypatch):

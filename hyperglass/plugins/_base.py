@@ -113,7 +113,8 @@ class DirectivePlugin(BaseModel):
 class PlatformPlugin(BaseModel):
     """Plugin associated with specific device platform.
 
-    Should always be subclassed with `HyperglassPlugin`.
+    Should always be subclassed with `HyperglassPlugin`. An empty platform list
+    leaves directive-specific output plugins unrestricted by platform.
     """
 
     platforms: t.Sequence[str] = ()

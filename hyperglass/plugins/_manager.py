@@ -133,11 +133,11 @@ class InputPluginManager(PluginManager[InputPlugin], type="input"):
         self: "InputPluginManager", query: "Query"
     ) -> t.Generator[InputPlugin, None, None]:
         for plugin in self.plugins(builtins=True):
-            if plugin.directives and query.directive.id in plugin.directives:
-                yield plugin
-            if plugin.ref in query.directive.plugins:
-                yield plugin
-            if plugin.common is True:
+            if (
+                query.directive.id in plugin.directives
+                or plugin.ref in query.directive.plugins
+                or plugin.common is True
+            ):
                 yield plugin
 
     def validate(self: "InputPluginManager", query: "Query") -> InputPluginValidationReturn:
@@ -145,7 +145,7 @@ class InputPluginManager(PluginManager[InputPlugin], type="input"):
 
         If any plugin returns `False`, execution is halted.
         """
-        result = None
+        accepted = None
         for plugin in self._gather_plugins(query):
             result = plugin.validate(query)
             result_test = "valid" if result is True else "invalid" if result is False else "none"
@@ -155,8 +155,8 @@ class InputPluginManager(PluginManager[InputPlugin], type="input"):
                     error="No matched validation rules", target=query.query_target
                 )
             if result is True:
-                return result
-        return result
+                accepted = True
+        return accepted
 
     def transform(self: "InputPluginManager", *, query: "Query") -> InputPluginTransformReturn:
         """Execute all input transformation plugins."""
@@ -176,12 +176,18 @@ class OutputPluginManager(PluginManager[OutputPlugin], type="output"):
         The result of each plugin is passed to the next plugin.
         """
         result = output
+        plugins = self.plugins()
         directives = (
             plugin
-            for plugin in self.plugins()
-            if query.directive.id in plugin.directives and query.device.platform in plugin.platforms
+            for plugin in plugins
+            if plugin.common is not True
+            and query.directive.id in plugin.directives
+            and (not plugin.platforms or query.device.platform in plugin.platforms)
         )
-        common = (plugin for plugin in self.plugins() if plugin.common is True)
+        # Common plugins run once, after directive parsing, even if their class
+        # also declares directive selectors. Processing twice is not safe for
+        # non-idempotent transforms or parsers.
+        common = (plugin for plugin in plugins if plugin.common is True)
         for plugin in (*directives, *common):
             log.bind(plugin=plugin.name, value=result).debug("Output Plugin Starting Value")
             result = plugin.process(output=result, query=query)

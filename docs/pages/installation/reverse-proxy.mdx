@@ -20,11 +20,29 @@ device. A reverse proxy gives you:
 | Concern | What the proxy provides |
 | --- | --- |
 | **TLS** | HTTPS termination (e.g. automatic Let's Encrypt with Caddy). |
-| **Client identity** | A single hop that sets or overwrites `X-Forwarded-For` / `X-Real-IP` so rate limiting keys on the real client. Litestar trusts these headers; if the app port is reachable without a sanitizing proxy, clients can rotate spoofed `X-Forwarded-For` values and bypass the per-client rate limit. |
+| **Client identity** | A single hop that overwrites `X-Forwarded-For`. The rate limiter uses the ASGI client address resolved by Uvicorn, not raw request headers. Uvicorn must trust only your sanitizing proxy. |
 | **Attack surface** | Keep the uvicorn workers off the public internet; only the proxy listens on `:443` / `:80`. |
 
 The stock `compose.yaml` publishes hyperglass on `127.0.0.1` only so it is not world-reachable
 by default. Point Caddy (or another proxy) at that local port.
+
+Set `FORWARDED_ALLOW_IPS` to the exact proxy peer address seen by Uvicorn (its
+default is `127.0.0.1`). Docker and IPv6 loopback deployments may use a different
+peer address. Do not use `*` or trust public client addresses. An untrusted proxy
+will cause its clients to share one rate-limit budget; an overly broad trust list
+can let clients spoof their identity. Check this setting against your actual
+network path before rollout, including any CDN or load balancer in front.
+
+Query admission requires Redis, including permission to run Lua scripts (`EVAL`).
+Redis errors reject the query instead of bypassing the limiter. Counters use a new
+key format, so each client receives a fresh budget once when upgrading from the
+previous limiter. Avoid a prolonged rollout with mixed old and new workers.
+
+The query-output cache also uses a new versioned key so responses cached before
+the plugin-policy fixes are not returned. Expect a temporary increase in device
+queries while the new cache warms. Existing keys are left to expire; no database
+flush is required. Older workers must be drained because they still serve the
+old output cache and use the old limiter.
 
 [Caddy](https://caddyserver.com) is recommended, but any reverse proxy ([NGINX](https://www.nginx.com), [Apache2](https://httpd.apache.org)) will work.
 

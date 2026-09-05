@@ -17,11 +17,15 @@ services:
             - HYPERGLASS_RATE_LIMIT=${HYPERGLASS_RATE_LIMIT-10}
             - HYPERGLASS_RATE_LIMIT_PERIOD=${HYPERGLASS_RATE_LIMIT_PERIOD-minute}
             - HYPERGLASS_RATE_LIMIT_ENABLE=${HYPERGLASS_RATE_LIMIT_ENABLE-true}
+            # Set this to the proxy peer as seen inside the container, not the
+            # host's published-port address. See the reverse-proxy guide.
+            # Preserve Uvicorn's default; an explicit empty value trusts no proxy.
+            - FORWARDED_ALLOW_IPS=${FORWARDED_ALLOW_IPS-127.0.0.1}
             - HYPERGLASS_ORIGINAL_APP_PATH=${HYPERGLASS_APP_PATH}
         build: .
         # Bind to loopback only — put Caddy/NGINX (or another reverse proxy) in
-        # front for public HTTPS. Publishing on 0.0.0.0 would let clients spoof
-        # X-Forwarded-For and bypass rate limits; see docs/installation/reverse-proxy.
+        # front for public HTTPS. Keep untrusted clients off the app port and
+        # configure proxy trust explicitly; see docs/installation/reverse-proxy.
         ports:
             - "127.0.0.1:${HYPERGLASS_PORT-8001}:${HYPERGLASS_PORT-8001}"
         volumes:

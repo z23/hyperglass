@@ -46,8 +46,8 @@ class NetmikoConnection(SSHConnection):
         duration of the device interaction (up to the request timeout), so the
         work is offloaded to a worker thread. ``abandon_on_cancel=True`` lets the
         upstream timeout in ``execution.main.execute`` return promptly on
-        expiry; the abandoned thread is bounded by Netmiko's own ``timeout`` /
-        ``session_timeout``.
+        expiry. The thread still runs until Netmiko's connection/read operations
+        finish; ``session_timeout`` is a lock timeout, not a total deadline.
         """
         return await anyio.to_thread.run_sync(self._collect, host, port, abandon_on_cancel=True)
 
@@ -100,11 +100,12 @@ class NetmikoConnection(SSHConnection):
 
             responses = ()
 
-            for query in self.query:
-                raw = nm_connect_direct.send_command(query, **send_args)
-                responses += (raw,)
-
-            nm_connect_direct.disconnect()
+            try:
+                for query in self.query:
+                    raw = nm_connect_direct.send_command(query, **send_args)
+                    responses += (raw,)
+            finally:
+                nm_connect_direct.disconnect()
 
         except NetMikoTimeoutException as scrape_error:
             raise DeviceTimeout(error=scrape_error, device=self.device) from scrape_error

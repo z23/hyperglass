@@ -37,9 +37,13 @@ server {
       try_files $uri @proxy_to_app;
   }
 
+  # Native backend: set FORWARDED_ALLOW_IPS=::1 in the hyperglass process
+  # environment, not NGINX's. The native systemd sample sets this default.
+  # For Docker's published port, use http://127.0.0.1:8001 below and set
+  # FORWARDED_ALLOW_IPS to the container-visible proxy peer in Compose.
   location @proxy_to_app {
     proxy_set_header X-Real-IP $remote_addr;
-    proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-For $remote_addr;
     proxy_set_header X-Forwarded-Proto $scheme;
     proxy_set_header Host $http_host;
     proxy_redirect off;

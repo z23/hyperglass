@@ -62,7 +62,10 @@ systemctl start hyperglass
 <Callout type="warning">
     **Required for production.** Do not expose the hyperglass application port to the public
     internet. The stock `compose.yaml` binds to `127.0.0.1` only; terminate TLS and forward traffic
-    with Caddy (or NGINX/Apache). See [Reverse Proxy](reverse-proxy.mdx).
+    with Caddy (or NGINX/Apache). Set `FORWARDED_ALLOW_IPS` to the proxy peer as seen
+    inside the hyperglass container, not the host's loopback address. Follow the
+    [Docker proxy-trust setup](reverse-proxy.mdx#docker-proxy-trust), including
+    loading the environment file and recreating the container after changes.
 </Callout>
 
 </Steps>

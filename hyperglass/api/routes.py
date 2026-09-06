@@ -72,7 +72,8 @@ async def query(_state: HyperglassState, request: Request, data: Query) -> Query
 
     # Use hashed `data` string as key for for k/v cache store so
     # each command output value is unique.
-    cache_key = f"hyperglass.query.{data.digest()}"
+    # Do not reuse outputs cached before directive output plugins were enforced.
+    cache_key = f"hyperglass.query.v2.{data.digest()}"
 
     _log = log.bind(query=data.summary())
 

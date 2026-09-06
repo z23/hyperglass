@@ -1,5 +1,8 @@
 """Tests for Directives.device_builtins attr-aware filtering."""
 
+# Third Party
+import pytest
+
 # Project
 from hyperglass.defaults.directives.arista_eos import (
     AristaPing,
@@ -12,6 +15,7 @@ from hyperglass.defaults.directives.arista_eos import (
     AristaBGPASPathVRF,
     AristaTracerouteVRF,
     AristaBGPCommunityVRF,
+    AristaBGPRouteVRFTable,
 )
 
 # Local
@@ -69,11 +73,21 @@ def test_device_builtins_with_vrf_attr_includes_vrf_directives():
     assert ids == NON_VRF_IDS | VRF_IDS
 
 
-def test_device_builtins_vrf_directive_renders_vrf_in_command():
-    """The VRF built-in's command template should substitute `{vrf}`."""
-    cmd = AristaBGPRouteVRF.rules[0].commands[0]
-    assert cmd.format(vrf="public", target="192.0.2.0/24") == (
-        "show ip bgp vrf public 192.0.2.0/24"
+@pytest.mark.parametrize(
+    ("directive", "suffix"),
+    [(AristaBGPRouteVRF, ""), (AristaBGPRouteVRFTable, " | json")],
+)
+@pytest.mark.parametrize(
+    ("rule_index", "family", "target"),
+    [(0, "ip", "192.0.2.0/24"), (1, "ipv6", "2001:db8::/32")],
+)
+def test_device_builtins_vrf_directive_renders_vrf_in_command(
+    directive, suffix, rule_index, family, target
+):
+    """EOS BGP route filters precede the VRF selector for both output formats."""
+    cmd = directive.rules[rule_index].commands[0]
+    assert cmd.format(vrf="public", target=target) == (
+        f"show {family} bgp {target} vrf public{suffix}"
     )
 
 

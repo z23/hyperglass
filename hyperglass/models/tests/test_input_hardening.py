@@ -207,7 +207,7 @@ def test_check_query_target_rejects_even_when_rule_would_permit():
 
 
 def test_shell_escape_linux_target_neutralizes_substitution():
-    """Escaped targets keep AS-path anchors but neutralize `$(…)` for bash.
+    r"""Escaped targets keep AS-path anchors but neutralize `$(…)` for bash.
 
     After bash double-quote parsing, `\$` becomes a literal `$`, so vtysh still
     sees `^65000$` while `$(reboot)` cannot execute.

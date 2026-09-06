@@ -5,7 +5,7 @@ import typing as t
 
 # Third Party
 from litestar import Request, Response
-from litestar.exceptions import ValidationException
+from litestar.exceptions import HTTPException, ValidationException
 
 # Project
 from hyperglass.log import log
@@ -52,12 +52,13 @@ def default_handler(request: Request, exc: BaseException) -> Response:
     )
 
 
-def http_handler(request: Request, exc: BaseException) -> Response:
+def http_handler(request: Request, exc: HTTPException) -> Response:
     """Handle web server errors."""
     log.bind(method=request.method, path=request.url.path, detail=exc.detail).critical("HTTP Error")
     return Response(
         {"output": exc.detail, "level": "danger", "keywords": []},
         status_code=exc.status_code,
+        headers=exc.headers,
     )
 
 

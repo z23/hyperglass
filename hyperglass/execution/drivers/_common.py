@@ -13,7 +13,6 @@ from ._construct import Construct
 
 if t.TYPE_CHECKING:
     # Project
-    from hyperglass.compat import SSHTunnelForwarder
     from hyperglass.models.api import Query
     from hyperglass.models.data import OutputDataModel
     from hyperglass.models.config.devices import Device
@@ -33,9 +32,8 @@ class Connection(ABC):
         self.plugin_manager = OutputPluginManager()
 
     @abstractmethod
-    def setup_proxy(self: "Connection") -> "SSHTunnelForwarder":
-        """Return a preconfigured sshtunnel.SSHTunnelForwarder instance."""
-        pass
+    async def collect(self, *args: t.Any, **kwargs: t.Any) -> t.Iterable:
+        """Retrieve output from the device."""
 
     async def response(self, output: Series[str]) -> t.Union["OutputDataModel", str]:
         """Send output through common parsers."""

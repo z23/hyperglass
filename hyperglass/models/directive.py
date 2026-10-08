@@ -119,6 +119,47 @@ class RuleWithIP(Rule):
             return True
         return False
 
+    def disallowed_reason(self, target: IPvAnyNetwork) -> t.Optional[str]:
+        """Explain why a target is refused by the allow_* flags, or None if it is fine.
+
+        Both ends of the target prefix are checked so a prefix cannot smuggle a
+        reserved range past a check on its first address. Python's ``is_global``
+        is True for multicast, so that is tested explicitly.
+        """
+        for address in (target.network_address, target.broadcast_address):
+            if address.is_unspecified:
+                if not self.allow_unspecified:
+                    return "unspecified"
+                continue
+            if address.is_loopback:
+                if not self.allow_loopback:
+                    return "loopback"
+                continue
+            if (
+                address.is_multicast
+                or address.is_link_local
+                or address.is_reserved
+                or address.is_private
+                or not address.is_global
+            ):
+                if not self.allow_reserved:
+                    return "reserved, private, multicast or link-local"
+        return None
+
+    def _reject_disallowed(self, valid_target: IPvAnyNetwork, target: str) -> None:
+        """Raise if a member target is refused by the allow_* flags or carries a scope ID."""
+        if getattr(valid_target.network_address, "scope_id", None):
+            # `fe80::1%eth0` parses, but the scope ID would be passed to the
+            # device verbatim and names an interface on the device itself.
+            self._passed = False
+            raise InputValidationError(error="IPv6 scope IDs are not allowed", target=target)
+        reason = self.disallowed_reason(valid_target)
+        if reason is not None:
+            self._passed = False
+            raise InputValidationError(
+                error="Target is a {reason} address", target=target, reason=reason
+            )
+
     def in_range(self, target: IPvAnyNetwork) -> bool:
         """Verify if target prefix length is within ge/le threshold."""
         if target.prefixlen <= self.le and target.prefixlen >= self.ge:
@@ -156,6 +197,9 @@ class RuleWithIP(Rule):
 
         is_member = self.membership(valid_target, self.condition)
         in_range = self.in_range(valid_target)
+
+        if is_member and self.action == "permit":
+            self._reject_disallowed(valid_target, target)
 
         if all((is_member, in_range, self.action == "permit")):
             self._passed = True
@@ -219,9 +263,7 @@ class RuleWithPattern(Rule):
     # shell substitution sequences `$(` / `${` are rejected in
     # `validate_single_value` (and again at Layer 1 / construct) so that
     # linux_ssh platforms cannot be RCE'd via command substitution.
-    _WILDCARD_PATTERN = re.compile(
-        r"[A-Za-z0-9:_\-\^\$\.\*\+\?\(\)\[\] ]+"
-    )
+    _WILDCARD_PATTERN = re.compile(r"[A-Za-z0-9:_\-\^\$\.\*\+\?\(\)\[\] ]+")
 
     def validate_target(  # noqa: C901
         self, target: t.Union[str, t.List[str]], *, multiple: bool
@@ -405,7 +447,7 @@ class Directive(HyperglassUniqueModel, unique_by=("id", "table_output")):
             "name": self.name,
             "field_type": self.field_type,
             "groups": self.groups,
-            "description": self.field.description if self.field is not None else '',
+            "description": self.field.description if self.field is not None else "",
             "info": None,
         }
 

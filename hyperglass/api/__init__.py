@@ -7,6 +7,7 @@ import logging
 from litestar import Litestar
 from litestar.openapi import OpenAPIConfig
 from litestar.exceptions import HTTPException, ValidationException
+from litestar.middleware import DefineMiddleware
 from litestar.static_files import create_static_files_router
 
 # Project
@@ -17,7 +18,7 @@ from hyperglass.exceptions import HyperglassError
 # Local
 from .events import check_redis
 from .routes import info, query, device, devices, queries
-from .middleware import COMPRESSION_CONFIG, create_cors_config
+from .middleware import COMPRESSION_CONFIG, MaxRequestBodySizeMiddleware, create_cors_config
 from .error_handlers import app_handler, http_handler, default_handler, validation_handler
 
 __all__ = ("app",)
@@ -64,11 +65,13 @@ if not STATE.settings.disable_ui:
 # per-client counter is shared across all worker processes; without it each
 # worker keeps its own in-memory counter and the effective limit is
 # `workers * limit`.
-MIDDLEWARE = []
+# Body size limit is outermost so oversized payloads are rejected before any
+# other middleware or handler reads the body.
+MIDDLEWARE = [DefineMiddleware(MaxRequestBodySizeMiddleware)]
 STORES = {}
 RATE_LIMIT_CONFIG = STATE.params.rate_limit.to_litestar_config()
 if RATE_LIMIT_CONFIG is not None:
-    MIDDLEWARE = [RATE_LIMIT_CONFIG.middleware]
+    MIDDLEWARE = [*MIDDLEWARE, RATE_LIMIT_CONFIG.middleware]
     STORES[RATE_LIMIT_CONFIG.store] = STATE.params.rate_limit.redis_store(
         str(STATE.settings.redis_dsn)
     )

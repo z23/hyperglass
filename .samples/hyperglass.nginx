@@ -34,6 +34,9 @@ server {
   }
 
   location /api {
+      # Query payloads are tiny; cap request bodies so a client cannot push
+      # oversized JSON at the API. hyperglass also enforces a 16 KiB limit in-app.
+      client_max_body_size 16k;
       try_files $uri @proxy_to_app;
   }
 

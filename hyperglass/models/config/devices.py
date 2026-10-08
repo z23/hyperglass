@@ -34,6 +34,37 @@ from .http_client import HttpConfiguration
 
 ALL_DEVICE_TYPES = {*DRIVER_MAP.keys(), *CLASS_MAPPER.keys()}
 
+# Netmiko defaults to paramiko's AutoAddPolicy, which accepts any SSH host key.
+# These `driver_config` keys are passed straight through to Netmiko and turn
+# verification on (see docs/configuration/devices/ssh-host-keys).
+SSH_HOST_KEY_DOCS = "https://hyperglass.dev/configuration/devices/ssh-host-keys"
+
+
+def ssh_host_key_warning(device: "Device") -> t.Optional[str]:
+    """Return a warning if an SSH device does not verify the remote host key.
+
+    Netmiko only rejects unknown host keys when ``ssh_strict`` is true, and only
+    has keys to compare against when ``system_host_keys`` or ``alt_host_keys``
+    is set. Anything less means a man-in-the-middle between hyperglass and the
+    device is accepted silently.
+    """
+    if getattr(device, "driver", None) != "netmiko":
+        return None
+    config = getattr(device, "driver_config", None) or {}
+    strict = config.get("ssh_strict") is True
+    has_keys = config.get("system_host_keys") is True or config.get("alt_host_keys") is True
+    if strict and has_keys:
+        return None
+    if strict and not has_keys:
+        return (
+            "Device '{d}' sets ssh_strict but loads no host keys "
+            "(system_host_keys or alt_host_keys); every connection will be rejected. See {u}"
+        ).format(d=device.name, u=SSH_HOST_KEY_DOCS)
+    return (
+        "Device '{d}' does not verify SSH host keys (driver_config.ssh_strict is not set); "
+        "the device identity is not authenticated. See {u}"
+    ).format(d=device.name, u=SSH_HOST_KEY_DOCS)
+
 
 class APIDevice(t.TypedDict):
     """API Response Model for a device."""
@@ -77,6 +108,9 @@ class Device(HyperglassModelWithId, extra="allow"):
             kw = self._with_id(kw)
         super().__init__(**kw)
         self._validate_directive_attrs()
+        warning = ssh_host_key_warning(self)
+        if warning is not None:
+            log.bind(device=self.name).warning(warning)
 
     @property
     def _target(self):
@@ -363,9 +397,9 @@ class Devices(MultiModel, model=Device, unique_by="id"):
                         "group": group,
                         "id": device.id,
                         "name": device.name,
-                        "avatar": f"/images/{device.avatar.name}"
-                        if device.avatar is not None
-                        else None,
+                        "avatar": (
+                            f"/images/{device.avatar.name}" if device.avatar is not None else None
+                        ),
                         "description": device.description,
                         "directives": [d.frontend() for d in device.directives],
                     }

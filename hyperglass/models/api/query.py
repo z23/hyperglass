@@ -85,7 +85,11 @@ class Query(BaseModel):
         state = use_state()
         self._state = state
 
-        query_directives = self.device.directives.matching(self.query_type)
+        # Resolve the directive by exact `id`. `Directives.matching()` builds an
+        # unescaped `.*{value}.*` regex from the request value and returns every
+        # partial match, so an id that is a prefix of a sibling (`foo` vs
+        # `foo_table`) could resolve to the wrong directive.
+        query_directives = self.device.directives.filter(self.query_type)
 
         if len(query_directives) < 1:
             raise QueryTypeNotFound(query_type=self.query_type)

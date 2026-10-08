@@ -263,7 +263,13 @@ class RuleWithPattern(Rule):
     # shell substitution sequences `$(` / `${` are rejected in
     # `validate_single_value` (and again at Layer 1 / construct) so that
     # linux_ssh platforms cannot be RCE'd via command substitution.
-    _WILDCARD_PATTERN = re.compile(r"[A-Za-z0-9:_\-\^\$\.\*\+\?\(\)\[\] ]+")
+    #
+    # `?` is deliberately excluded. On EOS / IOS-style CLIs it is the
+    # context-help key: the device prints help and re-echoes the line without
+    # the `?`, so Netmiko's command-echo verification never matches and the
+    # SSH session is held until `read_timeout` expires. A regex `?` cannot be
+    # typed on those CLIs anyway, so it has no legitimate use here.
+    _WILDCARD_PATTERN = re.compile(r"[A-Za-z0-9:_\-\^\$\.\*\+\(\)\[\] ]+")
 
     def validate_target(  # noqa: C901
         self, target: t.Union[str, t.List[str]], *, multiple: bool

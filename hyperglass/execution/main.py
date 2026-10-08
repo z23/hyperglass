@@ -16,7 +16,10 @@ import anyio
 from hyperglass.log import log
 from hyperglass.state import use_state
 from hyperglass.util.typing import is_series
-from hyperglass.exceptions.public import DeviceTimeout, ResponseEmpty
+from hyperglass.exceptions.public import DeviceBusy, DeviceTimeout, ResponseEmpty
+
+# Local
+from .concurrency import DeviceConcurrencyLimiter
 
 if TYPE_CHECKING:
     from hyperglass.models.api import Query
@@ -36,16 +39,8 @@ def map_driver(driver_name: str) -> "Connection":
     return NetmikoConnection
 
 
-async def execute(query: "Query") -> Union["OutputDataModel", str]:
-    """Initiate query validation and execution."""
-    params = use_state("params")
-    output = params.messages.general
-    _log = log.bind(query=query.summary(), device=query.device.id)
-    _log.debug("")
-
-    mapped_driver = map_driver(query.device.driver)
-    driver: "Connection" = mapped_driver(query.device, query)
-
+async def _collect(driver: "Connection", query: "Query", request_timeout: float):
+    """Run the device interaction inside the request budget, aborting it on expiry."""
     # Bound the whole device interaction with an async-native timeout. The
     # blocking Netmiko driver runs in a worker thread (see NetmikoConnection),
     # so a per-request timeout is safe here. This replaces a process-global
@@ -54,17 +49,49 @@ async def execute(query: "Query") -> Union["OutputDataModel", str]:
     # overwrite each other's timers and the handler could fire inside an
     # unrelated coroutine.
     try:
-        with anyio.fail_after(params.request_timeout - 1):
+        with anyio.fail_after(request_timeout - 1):
             if query.device.proxy:
                 proxy = driver.setup_proxy()
                 with proxy() as tunnel:
-                    response = await driver.collect(tunnel.local_bind_host, tunnel.local_bind_port)
-            else:
-                response = await driver.collect()
+                    return await driver.collect(tunnel.local_bind_host, tunnel.local_bind_port)
+            return await driver.collect()
     except TimeoutError as timeout_error:
+        # The worker thread was abandoned, not stopped. Tear the device session
+        # down now so the device's SSH slot is freed immediately instead of
+        # when Netmiko's own read timeout expires.
+        abort = getattr(driver, "abort", None)
+        if callable(abort):
+            with anyio.move_on_after(5):
+                await anyio.to_thread.run_sync(abort, abandon_on_cancel=True)
         raise DeviceTimeout(
             error=TimeoutError("Connection timed out"), device=query.device
         ) from timeout_error
+
+
+async def execute(query: "Query") -> Union["OutputDataModel", str]:
+    """Initiate query validation and execution."""
+    state = use_state()
+    params = state.params
+    output = params.messages.general
+    _log = log.bind(query=query.summary(), device=query.device.id)
+    _log.debug("")
+
+    mapped_driver = map_driver(query.device.driver)
+    driver: "Connection" = mapped_driver(query.device, query)
+
+    # Every query is a live session on the device. Cap how many run at once per
+    # device (shared across workers via Redis) so stalled or flooded queries
+    # cannot exhaust the device's SSH connection limit.
+    limiter = DeviceConcurrencyLimiter.from_state(state)
+    limit = query.device.max_concurrent_queries
+    token = limiter.acquire(query.device.id, limit)
+    if token is None:
+        raise DeviceBusy(device=query.device, limit=limit)
+
+    try:
+        response = await _collect(driver, query, params.request_timeout)
+    finally:
+        limiter.release(query.device.id, token)
 
     output = await driver.response(response)
 

@@ -7,7 +7,7 @@ from pathlib import Path
 from ipaddress import IPv4Address, IPv6Address
 
 # Third Party
-from pydantic import FilePath, ValidationInfo, field_validator
+from pydantic import Field, FilePath, ValidationInfo, field_validator
 from netmiko.ssh_dispatcher import CLASS_MAPPER  # type: ignore
 
 # Project
@@ -68,6 +68,9 @@ class Device(HyperglassModelWithId, extra="allow"):
     directives: Directives = Directives()
     driver: t.Optional[SupportedDriver] = None
     driver_config: t.Dict[str, t.Any] = {}
+    # Upper bound on queries in flight against this device at once, shared
+    # across all workers. Each query is a live SSH session on the device.
+    max_concurrent_queries: int = Field(10, ge=1)
     attrs: t.Dict[str, str] = {}
 
     def __init__(self, **kw) -> None:
@@ -363,9 +366,9 @@ class Devices(MultiModel, model=Device, unique_by="id"):
                         "group": group,
                         "id": device.id,
                         "name": device.name,
-                        "avatar": f"/images/{device.avatar.name}"
-                        if device.avatar is not None
-                        else None,
+                        "avatar": (
+                            f"/images/{device.avatar.name}" if device.avatar is not None else None
+                        ),
                         "description": device.description,
                         "directives": [d.frontend() for d in device.directives],
                     }

@@ -23,6 +23,7 @@ Each configured device may have the following parameters:
 | `credential`        | Mapping         |               | Mapping/dict of a [credential configuration](/configuration/devices/credentials.mdx).                                                      |
 | `http`              | Mapping         |               | Mapping/dict of [HTTP client options](/configuration/devices/http-device.mdx), if this device is connected via HTTP.                       |
 | `proxy`             | Mapping         |               | Mapping/dict of [SSH proxy config](/configuration/devices/ssh-proxy.mdx) to use for this device's requests.                                |
+| `max_concurrent_queries` | Number     | 10            | Maximum queries in flight against this device at once, across all workers. Further queries get a `503` "device busy" response.             |
 
 <Callout type="tip">
 

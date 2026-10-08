@@ -30,13 +30,61 @@ netmiko_device_globals = {
     "mikrotik_switchos": {"global_cmd_verify": False},
 }
 
+# Per-platform `send_command` overrides. `read_timeout` values are clamped to
+# the request budget at call time (see `_send_args`); the Arista value is a
+# ceiling for deployments that raise `request_timeout` above the default.
 netmiko_device_send_args = {
     "arista_eos": {"read_timeout": 120},
 }
 
+# Netmiko's own default for `send_command(read_timeout=...)`.
+NETMIKO_DEFAULT_READ_TIMEOUT = 10
+
+
+def _send_args(platform: str, request_timeout: float) -> dict:
+    """Build `send_command` kwargs with `read_timeout` bounded by the request budget.
+
+    `execution.main.execute` abandons the request after `request_timeout - 1`
+    seconds. Any `read_timeout` beyond that only keeps the device SSH session
+    open with no way to deliver the result, so cap it just inside the budget.
+    """
+    args = {**netmiko_device_send_args.get(platform, {})}
+    budget = max(1, int(request_timeout) - 2)
+    args["read_timeout"] = min(args.get("read_timeout", NETMIKO_DEFAULT_READ_TIMEOUT), budget)
+    return args
+
 
 class NetmikoConnection(SSHConnection):
     """Handle a device connection via Netmiko."""
+
+    # Live Netmiko connection, set by the worker thread once established, so
+    # the request's timeout path can tear the session down from the event loop.
+    _connection = None
+    _aborted = False
+
+    def abort(self) -> None:
+        """Close the device session from outside the worker thread.
+
+        Called when the HTTP request times out. Closing the paramiko transport
+        makes the worker thread's blocking read fail immediately, so the device
+        SSH session is released now instead of when Netmiko's `read_timeout`
+        expires. Safe to call before the connection exists: `_collect` checks
+        `_aborted` after connecting and disconnects without sending commands.
+        """
+        self._aborted = True
+        connection = self._connection
+        if connection is None:
+            return
+        _log = log.bind(device=self.device.name)
+        try:
+            transport = getattr(connection, "remote_conn_pre", None)
+            if transport is not None:
+                transport.close()
+            else:
+                connection.disconnect()
+            _log.debug("Aborted device session")
+        except Exception as err:  # noqa: BLE001
+            _log.bind(error=str(err)).warning("Failed to abort device session")
 
     async def collect(self, host: str = None, port: int = None) -> Iterable:
         """Connect directly to a device.
@@ -64,7 +112,7 @@ class NetmikoConnection(SSHConnection):
 
         global_args = netmiko_device_globals.get(self.device.platform, {})
 
-        send_args = netmiko_device_send_args.get(self.device.platform, {})
+        send_args = _send_args(self.device.platform, params.request_timeout)
 
         driver_kwargs = {
             "host": host or self.device._target,
@@ -97,14 +145,22 @@ class NetmikoConnection(SSHConnection):
 
         try:
             nm_connect_direct = ConnectHandler(**driver_kwargs)
+            self._connection = nm_connect_direct
 
             responses = ()
 
             try:
+                if self._aborted:
+                    # The request timed out while we were still connecting.
+                    raise DeviceTimeout(
+                        error=TimeoutError("Request timed out during connection"),
+                        device=self.device,
+                    )
                 for query in self.query:
                     raw = nm_connect_direct.send_command(query, **send_args)
                     responses += (raw,)
             finally:
+                self._connection = None
                 nm_connect_direct.disconnect()
 
         except NetMikoTimeoutException as scrape_error:

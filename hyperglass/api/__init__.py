@@ -89,4 +89,7 @@ app = Litestar(
     cors_config=create_cors_config(state=STATE),
     compression_config=COMPRESSION_CONFIG,
     openapi_config=OPEN_API if STATE.params.docs.enable else None,
+    # Litestar >= 2.13 enforces this while reading the body (PYSEC-2024-178).
+    # Query payloads are well under 1 KiB.
+    request_max_body_size=16 * 1024,
 )

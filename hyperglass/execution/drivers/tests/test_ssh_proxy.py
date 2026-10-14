@@ -262,11 +262,28 @@ def test_client_closed_when_body_raises(state, fake_paramiko):
     assert fake_paramiko["clients"][0].closed is True
 
 
-def test_public_error_does_not_leak_proxy_details(state, fake_paramiko):
-    fake_paramiko["connect_exc"] = paramiko.AuthenticationException("denied")
+@pytest.mark.parametrize("stage", ["connect_exc", "open_channel_exc"])
+@pytest.mark.parametrize(
+    ("error", "public_error"),
+    [
+        (paramiko.AuthenticationException(f"denied for proxyuser@{PROXY_ADDRESS}"), AuthError),
+        (
+            paramiko.AuthenticationException(f"Authentication timeout for {PROXY_ADDRESS}"),
+            DeviceTimeout,
+        ),
+        (paramiko.ChannelException(1, f"refused {PROXY_ADDRESS}"), ScrapeError),
+        (TimeoutError(f"timed out reaching {PROXY_ADDRESS}"), DeviceTimeout),
+        (paramiko.SSHException(f"Server '{PROXY_ADDRESS}' not found in known_hosts"), ScrapeError),
+        (paramiko.SSHException(f"Timeout opening channel to {PROXY_ADDRESS}"), DeviceTimeout),
+        (OSError(2, f"missing /private/proxyuser/{PROXY_ADDRESS}"), ScrapeError),
+        (OSError(f"failed /private/proxyuser/{PROXY_ADDRESS}"), ScrapeError),
+    ],
+)
+def test_public_error_does_not_leak_proxy_details(state, fake_paramiko, stage, error, public_error):
+    fake_paramiko[stage] = error
     connection = make_connection(make_proxied_device())
 
-    with pytest.raises(AuthError) as excinfo:
+    with pytest.raises(public_error) as excinfo:
         with connection.proxy_channel():
             pass
 
@@ -277,6 +294,24 @@ def test_public_error_does_not_leak_proxy_details(state, fake_paramiko):
     keywords = excinfo.value.keywords
     assert not any(PROXY_ADDRESS in keyword for keyword in keywords)
     assert not any("proxyuser" in keyword for keyword in keywords)
+    assert "/private/" not in str(excinfo.value)
+    assert fake_paramiko["clients"][0].closed is True
+
+
+def test_bad_host_key_does_not_leak_host_or_key(state, fake_paramiko):
+    key = paramiko.RSAKey.generate(1024)
+    expected_key = paramiko.RSAKey.generate(1024)
+    fake_paramiko["connect_exc"] = paramiko.BadHostKeyException(PROXY_ADDRESS, key, expected_key)
+    connection = make_connection(make_proxied_device())
+    with pytest.raises(ScrapeError) as excinfo:
+        with connection.proxy_channel():
+            pass
+    public_values = [str(excinfo.value), *excinfo.value.keywords]
+    for value in public_values:
+        assert PROXY_ADDRESS not in value
+        assert key.get_base64() not in value
+        assert expected_key.get_base64() not in value
+    assert fake_paramiko["clients"][0].closed is True
 
 
 def test_os_error_does_not_leak_key_path(state, fake_paramiko, tmp_path):

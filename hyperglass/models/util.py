@@ -39,7 +39,8 @@ LEGACY_FIELDS: t.Dict[str, t.Tuple[LegacyField, ...]] = {
         LegacyField(old="nos", new="platform", overwrite=True),
         LegacyField(old="network", new="group", overwrite=False, required=False),
     ),
-    "Proxy": (LegacyField(old="nos", new="platform", overwrite=True),),
+    # `platform` is not required: the Proxy model defaults it to `linux_ssh`.
+    "Proxy": (LegacyField(old="nos", new="platform", overwrite=True, required=False),),
 }
 
 

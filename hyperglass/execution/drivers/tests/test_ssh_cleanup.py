@@ -53,12 +53,15 @@ def test_success_preserves_arista_commands_and_disconnects(connection):
     transport.disconnect.assert_called_once_with()
 
 
-@pytest.mark.parametrize("error", [RuntimeError("failed"), ReadTimeout("read failed")])
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [(RuntimeError("failed"), RuntimeError), (ReadTimeout("read failed"), DeviceTimeout)],
+)
 @pytest.mark.parametrize("failed_command", [0, 1])
-def test_command_errors_always_disconnect(connection, error, failed_command):
+def test_command_errors_always_disconnect(connection, error, expected, failed_command):
     driver, transport, _ = connection
     transport.send_command.side_effect = ["result"] * failed_command + [error]
-    with pytest.raises(type(error)):
+    with pytest.raises(expected):
         driver._collect()
     transport.disconnect.assert_called_once_with()
 

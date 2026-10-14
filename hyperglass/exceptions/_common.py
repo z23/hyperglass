@@ -59,13 +59,21 @@ class HyperglassError(Exception):
     def _safe_format(template: str, **kwargs: Dict[str, str]) -> str:
         """Safely format a string template from keyword arguments."""
 
-        keys = get_fmt_keys(template)
-        for key in keys:
-            if key not in kwargs:
-                kwargs.pop(key)
-            else:
-                kwargs[key] = str(kwargs[key])
-        return template.format(**kwargs)
+        try:
+            keys = get_fmt_keys(template)
+            for key in keys:
+                if key not in kwargs:
+                    # Leave placeholders with no matching keyword argument
+                    # as-is instead of raising a KeyError.
+                    kwargs[key] = "{" + key + "}"
+                else:
+                    kwargs[key] = str(kwargs[key])
+            return template.format(**kwargs)
+        except Exception:  # noqa: BLE001
+            # A message that cannot be formatted (e.g. one containing raw
+            # output with braces, or a template using attribute/index access
+            # on a keyword) must never raise inside error handling.
+            return template
 
     def _parse_pydantic_errors(*errors: Dict[str, Any]) -> str:
         errs = ("\n",)

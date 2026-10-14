@@ -55,12 +55,7 @@ async def execute(query: "Query") -> Union["OutputDataModel", str]:
     # unrelated coroutine.
     try:
         with anyio.fail_after(params.request_timeout - 1):
-            if query.device.proxy:
-                proxy = driver.setup_proxy()
-                with proxy() as tunnel:
-                    response = await driver.collect(tunnel.local_bind_host, tunnel.local_bind_port)
-            else:
-                response = await driver.collect()
+            response = await driver.collect()
     except TimeoutError as timeout_error:
         raise DeviceTimeout(
             error=TimeoutError("Connection timed out"), device=query.device

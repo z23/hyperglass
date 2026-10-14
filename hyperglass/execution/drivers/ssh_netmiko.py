@@ -14,6 +14,7 @@ from netmiko import (  # type: ignore
     NetMikoTimeoutException,
     NetMikoAuthenticationException,
 )
+from netmiko.exceptions import ReadException  # type: ignore
 
 # Project
 from hyperglass.log import log
@@ -38,8 +39,8 @@ netmiko_device_send_args = {
 class NetmikoConnection(SSHConnection):
     """Handle a device connection via Netmiko."""
 
-    async def collect(self, host: str = None, port: int = None) -> Iterable:
-        """Connect directly to a device.
+    async def collect(self) -> Iterable:
+        """Connect to a device, optionally via its SSH proxy.
 
         Netmiko performs blocking, synchronous socket I/O. Running it directly
         on the ASGI event loop would stall every other in-flight request for the
@@ -49,14 +50,14 @@ class NetmikoConnection(SSHConnection):
         expiry. The thread still runs until Netmiko's connection/read operations
         finish; ``session_timeout`` is a lock timeout, not a total deadline.
         """
-        return await anyio.to_thread.run_sync(self._collect, host, port, abandon_on_cancel=True)
+        return await anyio.to_thread.run_sync(self._collect, abandon_on_cancel=True)
 
-    def _collect(self, host: str = None, port: int = None) -> Iterable:
+    def _collect(self) -> Iterable:
         """Perform the blocking Netmiko device interaction (worker thread)."""
         params = use_state("params")
         _log = log.bind(
             device=self.device.name,
-            address=f"{host}:{port}",
+            address=f"{self.device._target}:{self.device.port}",
             proxy=str(self.device.proxy.address) if self.device.proxy is not None else None,
         )
 
@@ -67,8 +68,8 @@ class NetmikoConnection(SSHConnection):
         send_args = netmiko_device_send_args.get(self.device.platform, {})
 
         driver_kwargs = {
-            "host": host or self.device._target,
-            "port": port or self.device.port,
+            "host": self.device._target,
+            "port": self.device.port,
             "device_type": self.device.get_device_type(),
             "username": self.device.credential.username,
             "global_delay_factor": 0.1,
@@ -95,25 +96,48 @@ class NetmikoConnection(SSHConnection):
                 # private key password.
                 driver_kwargs["passphrase"] = self.device.credential.password.get_secret_value()
 
+        with self.proxy_channel() as proxy_sock:
+            if proxy_sock is not None:
+                # Set after the `driver_config` spread so user-supplied driver
+                # config cannot replace the proxy channel.
+                driver_kwargs["sock"] = proxy_sock
+
+            responses = self._run_queries(driver_kwargs, send_args)
+
+        if not responses:
+            raise ResponseEmpty(query=self.query_data)
+
+        return responses
+
+    def _run_queries(self, driver_kwargs: dict, send_args: dict) -> Iterable:
+        """Run this connection's queries over a Netmiko session, always disconnecting."""
+        session = None
+        responses = ()
+
         try:
-            nm_connect_direct = ConnectHandler(**driver_kwargs)
+            session = ConnectHandler(**driver_kwargs)
 
-            responses = ()
-
-            try:
-                for query in self.query:
-                    raw = nm_connect_direct.send_command(query, **send_args)
-                    responses += (raw,)
-            finally:
-                nm_connect_direct.disconnect()
+            for query in self.query:
+                raw = session.send_command(query, **send_args)
+                responses += (raw,)
 
         except NetMikoTimeoutException as scrape_error:
             raise DeviceTimeout(error=scrape_error, device=self.device) from scrape_error
 
+        except ReadException as read_error:
+            # Netmiko raises `send_command` read timeouts as ReadTimeout
+            # (a ReadException), not as NetMikoTimeoutException.
+            raise DeviceTimeout(error=read_error, device=self.device) from read_error
+
         except NetMikoAuthenticationException as auth_error:
             raise AuthError(error=auth_error, device=self.device) from auth_error
 
-        if not responses:
-            raise ResponseEmpty(query=self.query_data)
+        finally:
+            if session is not None:
+                try:
+                    session.disconnect()
+                except Exception:  # noqa: BLE001
+                    # Never let disconnect cleanup mask the real error.
+                    log.bind(device=self.device.name).debug("Error disconnecting from device")
 
         return responses

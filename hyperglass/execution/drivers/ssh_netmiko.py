@@ -5,7 +5,7 @@ https://github.com/ktbyers/netmiko
 
 # Standard Library
 import math
-from typing import Iterable
+from typing import TYPE_CHECKING, Iterable
 
 # Third Party
 import anyio
@@ -22,6 +22,9 @@ from hyperglass.exceptions.public import AuthError, DeviceTimeout, ResponseEmpty
 
 # Local
 from .ssh import SSHConnection
+
+if TYPE_CHECKING:
+    from ..concurrency import DeviceConcurrencySlot
 
 netmiko_device_globals = {
     # Netmiko doesn't currently handle Mikrotik echo verification well,
@@ -57,10 +60,11 @@ def _send_args(platform: str, request_timeout: float) -> dict:
 class NetmikoConnection(SSHConnection):
     """Handle a device connection via Netmiko."""
 
-    # Live Netmiko connection, set by the worker thread once established, so
-    # the request's timeout path can tear the session down from the event loop.
+    # Own the Netmiko object before opening it, including partial setup, so
+    # timeout/failure cleanup can close any authenticated SSH client.
     _connection = None
     _aborted = False
+    _admission_slot: "DeviceConcurrencySlot | None" = None
 
     def abort(self) -> None:
         """Close the device session from outside the worker thread.
@@ -97,7 +101,15 @@ class NetmikoConnection(SSHConnection):
         expiry. The thread still runs until Netmiko's connection/read operations
         finish; ``session_timeout`` is a lock timeout, not a total deadline.
         """
-        return await anyio.to_thread.run_sync(self._collect, host, port, abandon_on_cancel=True)
+        return await anyio.to_thread.run_sync(
+            self._collect_with_slot, host, port, abandon_on_cancel=True
+        )
+
+    def _collect_with_slot(self, host: str = None, port: int = None) -> Iterable:
+        """Let the worker own admission for its entire connection lifetime."""
+        if self._admission_slot is not None:
+            return self._admission_slot.run(self._collect, host, port)
+        return self._collect(host, port)
 
     def _collect(self, host: str = None, port: int = None) -> Iterable:
         """Perform the blocking Netmiko device interaction (worker thread)."""
@@ -144,12 +156,21 @@ class NetmikoConnection(SSHConnection):
                 driver_kwargs["passphrase"] = self.device.credential.password.get_secret_value()
 
         try:
-            nm_connect_direct = ConnectHandler(**driver_kwargs)
+            # Netmiko's constructor normally opens the connection before it
+            # returns. Some failures (e.g. invoke_shell) bypass its cleanup.
+            # Retain the object first and run its same setup sequence ourselves.
+            nm_connect_direct = ConnectHandler(**{**driver_kwargs, "auto_connect": False})
             self._connection = nm_connect_direct
 
             responses = ()
 
             try:
+                if self._aborted:
+                    raise DeviceTimeout(
+                        error=TimeoutError("Request timed out before connection"),
+                        device=self.device,
+                    )
+                nm_connect_direct._open()
                 if self._aborted:
                     # The request timed out while we were still connecting.
                     raise DeviceTimeout(

@@ -19,7 +19,7 @@ from hyperglass.util.typing import is_series
 from hyperglass.exceptions.public import DeviceBusy, DeviceTimeout, ResponseEmpty
 
 # Local
-from .concurrency import DeviceConcurrencyLimiter
+from .concurrency import DeviceConcurrencySlot, DeviceConcurrencyLimiter
 
 if TYPE_CHECKING:
     from hyperglass.models.api import Query
@@ -55,14 +55,16 @@ async def _collect(driver: "Connection", query: "Query", request_timeout: float)
                 with proxy() as tunnel:
                     return await driver.collect(tunnel.local_bind_host, tunnel.local_bind_port)
             return await driver.collect()
-    except TimeoutError as timeout_error:
+    except (TimeoutError, anyio.get_cancelled_exc_class()) as timeout_error:
         # The worker thread was abandoned, not stopped. Tear the device session
         # down now so the device's SSH slot is freed immediately instead of
         # when Netmiko's own read timeout expires.
         abort = getattr(driver, "abort", None)
         if callable(abort):
-            with anyio.move_on_after(5):
+            with anyio.move_on_after(5, shield=True):
                 await anyio.to_thread.run_sync(abort, abandon_on_cancel=True)
+        if not isinstance(timeout_error, TimeoutError):
+            raise
         raise DeviceTimeout(
             error=TimeoutError("Connection timed out"), device=query.device
         ) from timeout_error
@@ -88,10 +90,18 @@ async def execute(query: "Query") -> Union["OutputDataModel", str]:
     if token is None:
         raise DeviceBusy(device=query.device, limit=limit)
 
+    slot = None
+    if isinstance(driver, NetmikoConnection):
+        slot = DeviceConcurrencySlot(limiter, query.device.id, token)
+        driver._admission_slot = slot
+
     try:
         response = await _collect(driver, query, params.request_timeout)
     finally:
-        limiter.release(query.device.id, token)
+        if slot is not None:
+            slot.release()
+        else:
+            limiter.release(query.device.id, token)
 
     output = await driver.response(response)
 

@@ -3,16 +3,22 @@
 # Standard Library
 from types import SimpleNamespace
 from unittest.mock import Mock
+from threading import Event, Lock
 
 # Third Party
 import anyio
 import pytest
+import paramiko
+from pydantic import SecretStr
+from netmiko.base_connection import BaseConnection
 
 # Project
 from hyperglass.execution import main as execution_main
-from hyperglass.execution.concurrency import DeviceConcurrencyLimiter
+from hyperglass.execution.drivers import ssh_netmiko
+from hyperglass.execution.concurrency import DeviceConcurrencySlot, DeviceConcurrencyLimiter
 from hyperglass.exceptions.public import DeviceBusy, DeviceTimeout
 from hyperglass.models.config.messages import Messages
+from hyperglass.settings import Settings
 
 
 def _limiter(redis):
@@ -64,7 +70,7 @@ def _live_redis():
     # Third Party
     from redis import Redis
 
-    client = Redis.from_url("redis://localhost:6379/15", socket_connect_timeout=0.5)
+    client = Redis.from_url(str(Settings.redis_dsn), socket_connect_timeout=0.5)
     try:
         client.ping()
     except Exception:  # noqa: BLE001
@@ -72,7 +78,7 @@ def _live_redis():
     return client
 
 
-@pytest.mark.skipif(_live_redis() is None, reason="no local Redis on localhost:6379")
+@pytest.mark.skipif(_live_redis() is None, reason="configured Redis is unavailable")
 def test_live_redis_cap_is_atomic_and_self_healing():
     redis = _live_redis()
     key = "hyperglass-test.device.inflight.r1"
@@ -190,3 +196,267 @@ async def test_execute_aborts_driver_and_releases_on_timeout(wiring):
     driver = FakeDriver.instances[0]
     assert driver.aborted is True
     assert limiter.released == [("r1", "tok")]
+
+
+class SingleSlotLimiter(FakeLimiter):
+    """Track one occupied slot across the event loop and worker."""
+
+    _ttl_ms = 5_000
+
+    def __init__(self):
+        super().__init__()
+        self.occupied = False
+        self.lock = Lock()
+
+    def acquire(self, device_id, limit):
+        """Admit at most one worker."""
+        with self.lock:
+            if self.occupied:
+                return None
+            self.occupied = True
+            return super().acquire(device_id, limit)
+
+    def release(self, device_id, token):
+        """Make the slot available again."""
+        with self.lock:
+            self.occupied = False
+            super().release(device_id, token)
+
+    def renew(self, device_id, token):
+        """Keep the fake slot from expiring."""
+        return True
+
+
+@pytest.fixture
+def blocked_worker(monkeypatch):
+    """Exercise execute and the real Netmiko worker without a network device."""
+    started, unblock, finished = Event(), Event(), Event()
+    params = SimpleNamespace(request_timeout=1.05, messages=Messages())
+    state = SimpleNamespace(params=params, redis=None)
+    monkeypatch.setattr(execution_main, "use_state", lambda key=None: state)
+    monkeypatch.setattr(ssh_netmiko, "use_state", lambda key: params)
+    monkeypatch.setattr("hyperglass.state.use_state", lambda key: params)
+    limiter = SingleSlotLimiter()
+    monkeypatch.setattr(DeviceConcurrencyLimiter, "from_state", classmethod(lambda cls, s: limiter))
+    device = SimpleNamespace(
+        id="r1",
+        name="Router 1",
+        driver="netmiko",
+        proxy=None,
+        max_concurrent_queries=1,
+        platform="cisco_ios",
+        _target="192.0.2.1",
+        port=22,
+        driver_config={},
+        get_device_type=lambda: "cisco_ios",
+        credential=SimpleNamespace(_method="password", username="test", password=SecretStr("test")),
+    )
+    query = SimpleNamespace(device=device, summary=lambda: "q")
+
+    class Driver(ssh_netmiko.NetmikoConnection):
+        """Bypass query construction while retaining the actual worker lifecycle."""
+
+        def __init__(self, device, query):
+            self.device, self.query_data, self.query = device, query, ("show route",)
+
+        async def response(self, output):
+            """Return the collected output."""
+            return "\n".join(output)
+
+        def _collect(self, host=None, port=None):
+            """Signal completion only after disconnect has returned."""
+            try:
+                return super()._collect(host, port)
+            finally:
+                finished.set()
+
+    monkeypatch.setattr(execution_main, "map_driver", lambda name: Driver)
+    transport = Mock()
+    transport.send_command.return_value = "output"
+
+    def connect(**kwargs):
+        started.set()
+        if not unblock.wait(5):
+            raise RuntimeError("test did not unblock constructor")
+        return transport
+
+    transport.disconnect.side_effect = finished.set
+    factory = Mock(side_effect=connect)
+    monkeypatch.setattr(ssh_netmiko, "ConnectHandler", factory)
+    yield SimpleNamespace(
+        limiter=limiter,
+        query=query,
+        started=started,
+        unblock=unblock,
+        finished=finished,
+        transport=transport,
+        factory=factory,
+    )
+    unblock.set()
+    if started.is_set():
+        assert finished.wait(2), "worker did not finish during fixture cleanup"
+
+
+async def wait_for_event(event):
+    """Bound waits without consuming the worker-thread pool."""
+    with anyio.fail_after(2):
+        while not event.is_set():
+            await anyio.sleep(0.005)
+
+
+@pytest.mark.asyncio
+async def test_timeout_retains_slot_until_constructor_worker_finishes(blocked_worker):
+    worker = blocked_worker
+    with pytest.raises(DeviceTimeout):
+        await execution_main.execute(worker.query)
+    assert worker.started.is_set()
+    assert worker.limiter.occupied is True
+    with pytest.raises(DeviceBusy):
+        await execution_main.execute(worker.query)
+    assert worker.factory.call_count == 1
+    worker.unblock.set()
+    await wait_for_event(worker.finished)
+    with anyio.fail_after(2):
+        while worker.limiter.occupied:
+            await anyio.sleep(0.005)
+    worker.transport.send_command.assert_not_called()
+    assert await execution_main.execute(worker.query) == "output"
+
+
+@pytest.mark.asyncio
+async def test_caller_cancellation_retains_slot_until_worker_finishes(blocked_worker):
+    import asyncio
+
+    worker = blocked_worker
+    task = asyncio.create_task(execution_main.execute(worker.query))
+    await wait_for_event(worker.started)
+    task.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task
+    assert worker.limiter.occupied is True
+    with pytest.raises(DeviceBusy):
+        await execution_main.execute(worker.query)
+    worker.unblock.set()
+    await wait_for_event(worker.finished)
+    worker.transport.send_command.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_timeout_retains_slot_through_disconnect(blocked_worker):
+    worker = blocked_worker
+    worker.factory.side_effect = None
+    worker.factory.return_value = worker.transport
+
+    def disconnect():
+        worker.started.set()
+        if not worker.unblock.wait(5):
+            raise RuntimeError("test did not unblock disconnect")
+        worker.finished.set()
+
+    worker.transport.disconnect.side_effect = disconnect
+    with pytest.raises(DeviceTimeout):
+        await execution_main.execute(worker.query)
+    assert worker.started.is_set()
+    assert worker.limiter.occupied is True
+    worker.unblock.set()
+    await wait_for_event(worker.finished)
+
+
+def test_cancelled_slot_prevents_late_worker_from_opening_a_connection():
+    limiter = SingleSlotLimiter()
+    token = limiter.acquire("r1", 1)
+    slot = DeviceConcurrencySlot(limiter, "r1", token)
+    connect = Mock()
+    slot.release()
+    slot.run(connect)
+    connect.assert_not_called()
+    assert limiter.released == [("r1", token)]
+
+
+@pytest.mark.asyncio
+async def test_queued_cancellation_releases_slot_without_starting_worker(blocked_worker):
+    import asyncio
+
+    worker = blocked_worker
+    pool = anyio.to_thread.current_default_thread_limiter()
+    previous_capacity = pool.total_tokens
+    occupied, unblock_pool = Event(), Event()
+
+    def occupy_pool():
+        occupied.set()
+        unblock_pool.wait(10)
+
+    pool.total_tokens = 1
+    holder = asyncio.create_task(anyio.to_thread.run_sync(occupy_pool))
+    try:
+        await wait_for_event(occupied)
+        task = asyncio.create_task(execution_main.execute(worker.query))
+        with anyio.fail_after(2):
+            while not worker.limiter.occupied:
+                await anyio.sleep(0.005)
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+        assert worker.limiter.occupied is False
+        unblock_pool.set()
+        await holder
+        await anyio.sleep(0.01)
+        worker.factory.assert_not_called()
+    finally:
+        unblock_pool.set()
+        await holder
+        pool.total_tokens = previous_capacity
+
+
+@pytest.mark.asyncio
+async def test_live_worker_renews_slot_past_redis_ttl(blocked_worker, monkeypatch):
+    redis = _live_redis()
+    if redis is None:
+        pytest.skip("configured Redis is unavailable")
+    worker = blocked_worker
+    key = "hyperglass-worker-renew-test.r1"
+    redis.delete(key)
+    limiter = DeviceConcurrencyLimiter(redis, key=lambda _: key, ttl_seconds=1)
+    monkeypatch.setattr(DeviceConcurrencyLimiter, "from_state", classmethod(lambda cls, s: limiter))
+    try:
+        with pytest.raises(DeviceTimeout):
+            await execution_main.execute(worker.query)
+        await anyio.sleep(1.3)
+        assert limiter.acquire("r1", 1) is None
+        assert redis.zcard(key) == 1
+        worker.unblock.set()
+        with anyio.fail_after(2):
+            while redis.zcard(key):
+                await anyio.sleep(0.005)
+        token = limiter.acquire("r1", 1)
+        assert token is not None
+        limiter.release("r1", token)
+        assert limiter.renew("r1", token) is False
+        assert redis.zcard(key) == 0
+    finally:
+        worker.unblock.set()
+        await wait_for_event(worker.finished)
+        redis.delete(key)
+
+
+@pytest.mark.asyncio
+async def test_failed_shell_open_closes_authenticated_client_before_release(
+    blocked_worker, monkeypatch
+):
+    clients = []
+
+    def make_client(connection):
+        client = Mock(spec=paramiko.SSHClient)
+        client.invoke_shell.side_effect = paramiko.ChannelException(1, "shell refused")
+        clients.append(client)
+        return client
+
+    # Run pinned Netmiko's real initialization/establishment; replace only SSH I/O.
+    monkeypatch.setattr(BaseConnection, "_build_ssh_client", make_client)
+    monkeypatch.setattr(ssh_netmiko, "ConnectHandler", BaseConnection)
+    for _ in range(2):
+        with pytest.raises(paramiko.ChannelException):
+            await execution_main.execute(blocked_worker.query)
+        assert blocked_worker.limiter.occupied is False
+        for client in clients:
+            client.close.assert_called_once_with()

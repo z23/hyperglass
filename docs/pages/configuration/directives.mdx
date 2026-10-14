@@ -47,6 +47,16 @@ A rule is a way of saying "if a query target matches the rule's conditions, run 
 | `allow_unspecified` | Boolean | `false`       | Allow unspecified addresses (`0.0.0.0` `::`) to pass validation.                                                                                                                                                  |
 | `allow_loopback`    | Boolean | `false`       | Allow [loopback addresses](https://www.rfc-editor.org/rfc/rfc1700.html) (`127.0.0.0/8` `::1`) to pass validation.                                                                                                 |
 
+<Callout type="info">
+    The three `allow_*` flags apply to **both ends** of the target prefix and are checked after the
+    target is found to be a member of the rule's `condition`. `allow_reserved` also covers
+    multicast, link-local, CGNAT (`100.64.0.0/10`) and any other non-global space. IPv6 scope IDs
+    (`fe80::1%eth0`) are always rejected. The built-in **BGP Route** directives set all three flags
+    to `true` so route lookups for private prefixes and the default route keep working; the
+    built-in **Ping** and **Traceroute** directives leave them at `false`, so those commands can
+    only be aimed at globally routable addresses.
+</Callout>
+
 #### Examples
 
 ##### Require IPv4 Queries between /8 and /24

@@ -3,7 +3,8 @@
 # Standard Library
 import re
 import typing as t
-from ipaddress import IPv4Network, IPv6Network, ip_network
+from functools import lru_cache
+from ipaddress import IPv4Address, IPv6Address, IPv4Network, IPv6Network, ip_network
 
 # Third Party
 from pydantic import Field, FilePath, PrivateAttr, IPvAnyNetwork, field_validator
@@ -26,6 +27,31 @@ RuleValidation = t.Union[t.Literal["ipv4", "ipv6", "pattern"], None]
 PassedValidation = t.Union[bool, None]
 IPFamily = t.Literal["ipv4", "ipv6"]
 RuleTypeAttr = t.Literal["ipv4", "ipv6", "pattern", "none"]
+
+
+@lru_cache(maxsize=2)
+def _ip_classification_boundaries(version: int) -> t.Tuple[int, ...]:
+    """Locate every address where an ipaddress policy classification can change.
+
+    Use the interpreter's tables, including global exceptions, so prefix checks
+    retain the same semantics as its address properties. Sampling these cuts
+    avoids enumerating a prefix or maintaining a second special-address registry.
+    """
+    address_type = IPv4Address if version == 4 else IPv6Address
+    boundaries = {0, 1, 2, 1 << (32 if version == 4 else 128)}
+    for value in vars(address_type._constants).values():
+        values = value if isinstance(value, (list, tuple)) else (value,)
+        for item in values:
+            if isinstance(item, (IPv4Network, IPv6Network)):
+                boundaries.update((int(item.network_address), int(item.broadcast_address) + 1))
+            elif isinstance(item, (IPv4Address, IPv6Address)):
+                boundaries.update((int(item), int(item) + 1))
+    if version == 6:
+        # IPv6 properties can delegate to IPv4 for mapped addresses, including
+        # prefixes whose global endpoints enclose private IPv4 ranges.
+        mapped_start = int(IPv6Address("::ffff:0:0"))
+        boundaries.update(mapped_start + point for point in _ip_classification_boundaries(4))
+    return tuple(sorted(boundaries))
 
 
 class Input(HyperglassModel):
@@ -119,6 +145,55 @@ class RuleWithIP(Rule):
             return True
         return False
 
+    def disallowed_reason(self, target: IPvAnyNetwork) -> t.Optional[str]:
+        """Explain why a target is refused by the allow_* flags, or None if it is fine.
+
+        Check endpoints and every internal classification boundary, since both
+        endpoints can be global while enclosing a private or reserved range.
+        Python's ``is_global`` is True for multicast, so test it explicitly.
+        """
+        address_type = type(target.network_address)
+        first, last = int(target.network_address), int(target.broadcast_address)
+        addresses = [target.network_address, target.broadcast_address]
+        addresses.extend(
+            address_type(point)
+            for point in _ip_classification_boundaries(target.version)
+            if first < point < last
+        )
+        for address in addresses:
+            if address.is_unspecified:
+                if not self.allow_unspecified:
+                    return "unspecified"
+                continue
+            if address.is_loopback:
+                if not self.allow_loopback:
+                    return "loopback"
+                continue
+            if (
+                address.is_multicast
+                or address.is_link_local
+                or address.is_reserved
+                or address.is_private
+                or not address.is_global
+            ):
+                if not self.allow_reserved:
+                    return "reserved, private, multicast or link-local"
+        return None
+
+    def _reject_disallowed(self, valid_target: IPvAnyNetwork, target: str) -> None:
+        """Raise if a member target is refused by the allow_* flags or carries a scope ID."""
+        if getattr(valid_target.network_address, "scope_id", None):
+            # `fe80::1%eth0` parses, but the scope ID would be passed to the
+            # device verbatim and names an interface on the device itself.
+            self._passed = False
+            raise InputValidationError(error="IPv6 scope IDs are not allowed", target=target)
+        reason = self.disallowed_reason(valid_target)
+        if reason is not None:
+            self._passed = False
+            raise InputValidationError(
+                error="Target is a {reason} address", target=target, reason=reason
+            )
+
     def in_range(self, target: IPvAnyNetwork) -> bool:
         """Verify if target prefix length is within ge/le threshold."""
         if target.prefixlen <= self.le and target.prefixlen >= self.ge:
@@ -156,6 +231,9 @@ class RuleWithIP(Rule):
 
         is_member = self.membership(valid_target, self.condition)
         in_range = self.in_range(valid_target)
+
+        if is_member and self.action == "permit":
+            self._reject_disallowed(valid_target, target)
 
         if all((is_member, in_range, self.action == "permit")):
             self._passed = True
@@ -219,9 +297,7 @@ class RuleWithPattern(Rule):
     # shell substitution sequences `$(` / `${` are rejected in
     # `validate_single_value` (and again at Layer 1 / construct) so that
     # linux_ssh platforms cannot be RCE'd via command substitution.
-    _WILDCARD_PATTERN = re.compile(
-        r"[A-Za-z0-9:_\-\^\$\.\*\+\?\(\)\[\] ]+"
-    )
+    _WILDCARD_PATTERN = re.compile(r"[A-Za-z0-9:_\-\^\$\.\*\+\?\(\)\[\] ]+")
 
     def validate_target(  # noqa: C901
         self, target: t.Union[str, t.List[str]], *, multiple: bool
@@ -405,7 +481,7 @@ class Directive(HyperglassUniqueModel, unique_by=("id", "table_output")):
             "name": self.name,
             "field_type": self.field_type,
             "groups": self.groups,
-            "description": self.field.description if self.field is not None else '',
+            "description": self.field.description if self.field is not None else "",
             "info": None,
         }
 

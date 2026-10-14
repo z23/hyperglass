@@ -3,7 +3,8 @@
 # Standard Library
 import re
 import typing as t
-from ipaddress import IPv4Network, IPv6Network, ip_network
+from functools import lru_cache
+from ipaddress import IPv4Address, IPv6Address, IPv4Network, IPv6Network, ip_network
 
 # Third Party
 from pydantic import Field, FilePath, PrivateAttr, IPvAnyNetwork, field_validator
@@ -26,6 +27,31 @@ RuleValidation = t.Union[t.Literal["ipv4", "ipv6", "pattern"], None]
 PassedValidation = t.Union[bool, None]
 IPFamily = t.Literal["ipv4", "ipv6"]
 RuleTypeAttr = t.Literal["ipv4", "ipv6", "pattern", "none"]
+
+
+@lru_cache(maxsize=2)
+def _ip_classification_boundaries(version: int) -> t.Tuple[int, ...]:
+    """Locate every address where an ipaddress policy classification can change.
+
+    Use the interpreter's tables, including global exceptions, so prefix checks
+    retain the same semantics as its address properties. Sampling these cuts
+    avoids enumerating a prefix or maintaining a second special-address registry.
+    """
+    address_type = IPv4Address if version == 4 else IPv6Address
+    boundaries = {0, 1, 2, 1 << (32 if version == 4 else 128)}
+    for value in vars(address_type._constants).values():
+        values = value if isinstance(value, (list, tuple)) else (value,)
+        for item in values:
+            if isinstance(item, (IPv4Network, IPv6Network)):
+                boundaries.update((int(item.network_address), int(item.broadcast_address) + 1))
+            elif isinstance(item, (IPv4Address, IPv6Address)):
+                boundaries.update((int(item), int(item) + 1))
+    if version == 6:
+        # IPv6 properties can delegate to IPv4 for mapped addresses, including
+        # prefixes whose global endpoints enclose private IPv4 ranges.
+        mapped_start = int(IPv6Address("::ffff:0:0"))
+        boundaries.update(mapped_start + point for point in _ip_classification_boundaries(4))
+    return tuple(sorted(boundaries))
 
 
 class Input(HyperglassModel):
@@ -122,11 +148,19 @@ class RuleWithIP(Rule):
     def disallowed_reason(self, target: IPvAnyNetwork) -> t.Optional[str]:
         """Explain why a target is refused by the allow_* flags, or None if it is fine.
 
-        Both ends of the target prefix are checked so a prefix cannot smuggle a
-        reserved range past a check on its first address. Python's ``is_global``
-        is True for multicast, so that is tested explicitly.
+        Check endpoints and every internal classification boundary, since both
+        endpoints can be global while enclosing a private or reserved range.
+        Python's ``is_global`` is True for multicast, so test it explicitly.
         """
-        for address in (target.network_address, target.broadcast_address):
+        address_type = type(target.network_address)
+        first, last = int(target.network_address), int(target.broadcast_address)
+        addresses = [target.network_address, target.broadcast_address]
+        addresses.extend(
+            address_type(point)
+            for point in _ip_classification_boundaries(target.version)
+            if first < point < last
+        )
+        for address in addresses:
             if address.is_unspecified:
                 if not self.allow_unspecified:
                     return "unspecified"

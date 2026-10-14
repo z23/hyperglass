@@ -2,6 +2,9 @@
 
 # ruff: noqa: S104
 
+# Standard Library
+from ipaddress import ip_network
+
 # Third Party
 import pytest
 
@@ -86,6 +89,49 @@ def test_prefix_spanning_reserved_space_is_rejected():
     """128.0.0.0/1 starts global but ends in 255.255.255.255."""
     with pytest.raises(InputValidationError):
         V4_STRICT.validate_target("128.0.0.0/1", multiple=False)
+
+
+@pytest.mark.parametrize(
+    ("rule", "target"),
+    [
+        (V4_STRICT, "8.0.0.0/5"),
+        (V4_STRICT, "8.0.0.0/248.0.0.0"),
+        (V4_STRICT, ["172.0.0.0/8"]),
+        (V4_STRICT, "100.0.0.0/8"),
+        (V4_STRICT, "192.0.0.0/8"),
+        (V6_STRICT, "2000::/3"),
+        (V6_STRICT, "::ffff:8.0.0.0/101"),
+        (V6_STRICT, "::ffff:172.0.0.0/104"),
+    ],
+)
+def test_prefix_with_global_endpoints_cannot_hide_special_ranges(rule, target):
+    with pytest.raises(InputValidationError):
+        rule.validate_target(target, multiple=False)
+    assert rule._passed is False
+
+
+@pytest.mark.parametrize(
+    ("rule", "target"),
+    [
+        (V4_STRICT, "192.0.0.9"),
+        (V4_STRICT, "192.0.0.10"),
+        (V6_STRICT, "2001:3::/32"),
+        (V6_STRICT, "::ffff:8.8.8.0/120"),
+    ],
+)
+def test_global_exceptions_and_mapped_public_prefixes_stay_allowed(rule, target):
+    # Older Python patch releases classify some exceptions/mapped addresses
+    # differently. Preserve the installed interpreter's address semantics.
+    address = ip_network(target).network_address
+    if not address.is_global or address.is_reserved:
+        pytest.skip("this interpreter does not classify the target as public")
+    assert rule.validate_target(target, multiple=False) is True
+
+
+@pytest.mark.parametrize("target", ["8.0.0.0/5", "172.0.0.0/8", "100.0.0.0/8"])
+def test_reserved_opt_in_allows_prefixes_with_internal_special_ranges(target):
+    rule = RuleWithIPv4(condition="0.0.0.0/0", command="show {target}", allow_reserved=True)
+    assert rule.validate_target(target, multiple=False) is True
 
 
 @pytest.mark.parametrize(

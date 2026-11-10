@@ -4,6 +4,7 @@
 import shlex
 import typing as t
 import ipaddress
+import unicodedata
 from datetime import datetime
 
 __name__ = "hyperglass"
@@ -120,7 +121,7 @@ FORBIDDEN_TARGET_CHARS = frozenset(
     "\x00\x01\x02\x03\x04\x05\x06\x07\x08\t\n\x0b\x0c\r\x0e\x0f"
     "\x10\x11\x12\x13\x14\x15\x16\x17\x18\x19\x1a\x1b\x1c\x1d\x1e\x1f"
     "\x7f"  # DEL
-    ";|&`<>\"\\"
+    ';|&`<>"\\'
 )
 
 # Multi-character sequences that are never legitimate looking-glass input.
@@ -131,9 +132,29 @@ FORBIDDEN_TARGET_CHARS = frozenset(
 FORBIDDEN_TARGET_SUBSTRINGS = ("$(", "${")
 
 
+# Unicode general categories that are never legitimate in a query target:
+# every "Other" category (C1 controls such as NEL, format characters such as
+# zero-width joiners and bidirectional overrides, surrogates, private use,
+# unassigned) and every separator (line and paragraph separators, and the
+# non-ASCII spaces). Device CLIs and terminals disagree on which of these end a
+# line or a word, and none of them appear in addresses, AS paths or communities.
+# The ASCII space is the only separator allowed.
+_FORBIDDEN_UNICODE_MAJOR_CATEGORIES = frozenset("CZ")
+
+# Maximum number of values a single query may carry in a list target.
+MAX_QUERY_TARGETS = 32
+
+
+def _is_forbidden_unicode(character: str) -> bool:
+    """Return True for a non-ASCII control, format or separator character."""
+    if character.isascii():
+        return False
+    return unicodedata.category(character)[0] in _FORBIDDEN_UNICODE_MAJOR_CATEGORIES
+
+
 def target_contains_forbidden_content(value: str) -> bool:
     """Return True if `value` contains a forbidden char or shell-substitution sequence."""
-    if any(c in FORBIDDEN_TARGET_CHARS for c in value):
+    if any(c in FORBIDDEN_TARGET_CHARS or _is_forbidden_unicode(c) for c in value):
         return True
     return any(seq in value for seq in FORBIDDEN_TARGET_SUBSTRINGS)
 

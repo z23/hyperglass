@@ -1,17 +1,18 @@
-"""Remove anything before the command if found in output."""
+"""Validate a BGP community string."""
 
 # Standard Library
 import typing as t
 from ipaddress import ip_address
 
 # Third Party
-from pydantic import PrivateAttr
+from pydantic import Field, PrivateAttr
 
 # Project
 from hyperglass.state.hooks import use_state
 
 # Local
 from .._input import InputPlugin
+from ._selectors import builtin_directive_ids
 
 if t.TYPE_CHECKING:
     # Project
@@ -26,11 +27,15 @@ EXTENDED_TYPES = ("target", "origin")
 
 
 def check_decimal(value: str, size: int) -> bool:
-    """Verify the value is a 32 bit number."""
-    try:
-        return abs(int(value)) <= size
-    except Exception:
+    """Verify the value is a plain decimal number no larger than `size`.
+
+    `int()` alone is too lenient for a value that is sent to a device: it
+    accepts surrounding whitespace, a sign, `_` digit separators and non-ASCII
+    digits.
+    """
+    if not isinstance(value, str) or not value.isascii() or not value.isdigit():
         return False
+    return int(value) <= size
 
 
 def check_string(value: str) -> bool:
@@ -94,6 +99,12 @@ class ValidateBGPCommunity(InputPlugin):
     """Validate a BGP community string."""
 
     _hyperglass_builtin: bool = PrivateAttr(True)
+    # Without a directive selector the plugin manager never runs this plugin,
+    # and the built-in community directives accept any text the wildcard rule
+    # allows, including extra command keywords after the community.
+    directives: t.Sequence[str] = Field(
+        default_factory=lambda: builtin_directive_ids("_bgp_community")
+    )
 
     def validate(self, query: "Query") -> "InputPluginValidationReturn":
         """Ensure an input query target is a valid BGP community."""

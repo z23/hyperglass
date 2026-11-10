@@ -456,6 +456,24 @@ class Directive(HyperglassUniqueModel, unique_by=("id", "table_output")):
         # rule's stale flag would never be cleared on its own.
         for rule in self.rules:
             rule._passed = None
+
+        values = target if isinstance(target, t.List) else [target]
+
+        if len(values) > 1 and not self.multiple:
+            # Only a `multiple` directive joins several values into one
+            # command. Anything else would interpolate the list itself.
+            raise InputValidationError(error="Target must be a single value", target=target)
+
+        if self.field is not None and self.field.is_select:
+            # A select field offers a fixed set of values. The UI only sends
+            # those, but the API is called directly too, so the list has to be
+            # enforced here or the directive accepts free text.
+            allowed = {option.value for option in self.field.options}
+            if any(value not in allowed for value in values):
+                raise InputValidationError(
+                    error="Target is not one of the available options", target=target
+                )
+
         for rule in self.rules:
             valid = rule.validate_target(target, multiple=self.multiple)
             if valid is True:

@@ -245,11 +245,28 @@ def test_ip_rule_rejects_zone_id_and_whitespace(target):
     ],
 )
 def test_ip_rule_accepts_canonical_prefixes_and_hosts(target):
-    """Legitimate prefixes and host addresses still match an IP rule."""
+    """Legitimate prefixes and host addresses still match an IP rule.
+
+    The targets are documentation ranges, which are not globally routable, so
+    the rules opt in with ``allow_reserved`` (as the built-in BGP route
+    directives do). This test is about address *form*, not address class.
+    """
     if ":" in target:
-        rule = RuleWithIPv6(condition="::/0", ge=0, le=128, commands=["show ipv6 bgp {target}"])
+        rule = RuleWithIPv6(
+            condition="::/0",
+            ge=0,
+            le=128,
+            allow_reserved=True,
+            commands=["show ipv6 bgp {target}"],
+        )
     else:
-        rule = RuleWithIPv4(condition="0.0.0.0/0", ge=0, le=32, commands=["show ip bgp {target}"])
+        rule = RuleWithIPv4(
+            condition="0.0.0.0/0",
+            ge=0,
+            le=32,
+            allow_reserved=True,
+            commands=["show ip bgp {target}"],
+        )
     assert rule.validate_target(target, multiple=False) is True
 
 
@@ -260,8 +277,9 @@ def test_directive_ip_rules_reject_zone_and_still_match_family():
         name="Ping",
         field=None,
         rules=[
-            {"condition": "0.0.0.0/0", "command": "ping {target}"},
-            {"condition": "::/0", "command": "ping ipv6 {target}"},
+            # Documentation addresses below are not globally routable.
+            {"condition": "0.0.0.0/0", "allow_reserved": True, "command": "ping {target}"},
+            {"condition": "::/0", "allow_reserved": True, "command": "ping ipv6 {target}"},
         ],
     )
     with pytest.raises(InputValidationError):

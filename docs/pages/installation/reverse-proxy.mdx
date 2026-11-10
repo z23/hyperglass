@@ -36,6 +36,10 @@ will cause its clients to share one rate-limit budget; an overly broad trust lis
 can let clients spoof their identity. Check this setting against your actual
 network path before rollout, including any CDN or load balancer in front.
 
+An IPv4 client is budgeted by its address. An IPv6 client is budgeted by its `/64`, because
+whoever holds a `/64` can send each request from a different address; all addresses in the same
+`/64` therefore share one rate-limit budget.
+
 Query admission requires Redis, including permission to run Lua scripts (`EVAL`).
 Redis errors reject the query instead of bypassing the limiter. Counters use a new
 key format, so each client receives a fresh budget once when upgrading from the

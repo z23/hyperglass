@@ -8,3 +8,10 @@ devices:
     attrs:
       source4: 127.0.0.1
       source6: 2001:db8::1
+    # Verify the device's SSH host key instead of accepting any key (Netmiko's
+    # default). Populate the file once with:
+    #   ssh-keyscan -H 127.0.0.1 >> /etc/hyperglass/known_hosts
+    driver_config:
+      ssh_strict: true
+      alt_host_keys: true
+      alt_key_file: /etc/hyperglass/known_hosts

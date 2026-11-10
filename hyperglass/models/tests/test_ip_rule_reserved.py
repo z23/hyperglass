@@ -166,7 +166,9 @@ def test_scope_id_is_always_rejected(rule):
     rule6 = V6_STRICT if rule is V4_STRICT else V6_OPEN
     with pytest.raises(InputValidationError) as excinfo:
         rule6.validate_target("fe80::1%eth0", multiple=False)
-    assert "scope" in _text(excinfo)
+    # `%` is refused before the address is parsed, so the scope-ID check in
+    # `_reject_disallowed` is a second line of defence behind this one.
+    assert "disallowed character" in _text(excinfo)
 
 
 def test_non_member_is_not_rejected_by_flags():

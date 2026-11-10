@@ -12,17 +12,19 @@ These tests pin the security guarantees of the input pipeline:
 """
 
 # Standard Library
-import pytest
+import shlex
 
 # Third Party
+import pytest
 from pydantic import TypeAdapter, ValidationError
 
 # Project
-from hyperglass.exceptions.private import InputValidationError
+from hyperglass.constants import canonical_ip_target, quote_shell_command, shell_escape_linux_target
 from hyperglass.models.api.query import Query, _check_query_target
+from hyperglass.exceptions.private import InputValidationError
 
 # Local
-from ..directive import Directive, RuleWithPattern, RuleWithIPv4
+from ..directive import Directive, RuleWithIPv4, RuleWithIPv6, RuleWithPattern
 
 
 @pytest.mark.parametrize(
@@ -195,9 +197,7 @@ def test_check_query_target_rejects_even_when_rule_would_permit():
     layers hard-block forbidden content so a custom permissive condition cannot
     re-open the injection path.
     """
-    permissive_rule = RuleWithPattern(
-        condition=r".*", action="permit", commands=["show {target}"]
-    )
+    permissive_rule = RuleWithPattern(condition=r".*", action="permit", commands=["show {target}"])
     target = "1.1.1.1;reboot"
     # Layer-2 now hard-blocks forbidden content even for custom regexes:
     assert permissive_rule.validate_target(target, multiple=False) is False
@@ -206,19 +206,134 @@ def test_check_query_target_rejects_even_when_rule_would_permit():
         _check_query_target(target)
 
 
+@pytest.mark.parametrize(
+    "target",
+    [
+        "2001:db8::1%x foo",
+        "2001:db8::1%1 foo",
+        "fe80::1%;id",
+        "fe80::1%eth0",
+        "fe80::1%eth0/128",
+        "192.0.2.1 foo",
+    ],
+)
+def test_ip_rule_rejects_zone_id_and_whitespace(target):
+    """IPv6 zone ids, including zone text with spaces, are not IP targets.
+
+    ``ipaddress`` accepts ``2001:db8::1%x foo`` and would stringify it with an
+    extra word. Ping and show commands must not receive that word.
+    """
+    rule = RuleWithIPv6(condition="::/0", ge=0, le=128, commands=["ping ipv6 {target}"])
+    with pytest.raises(InputValidationError):
+        rule.validate_target(target, multiple=False)
+    assert rule._passed is not True
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "192.0.2.1",
+        "192.0.2.0/24",
+        "192.0.2.1/32",
+        "2001:db8::1",
+        "2001:db8::/32",
+        "2001:0db8:0000::1",
+    ],
+)
+def test_ip_rule_accepts_canonical_prefixes_and_hosts(target):
+    """Legitimate prefixes and host addresses still match an IP rule."""
+    if ":" in target:
+        rule = RuleWithIPv6(condition="::/0", ge=0, le=128, commands=["show ipv6 bgp {target}"])
+    else:
+        rule = RuleWithIPv4(condition="0.0.0.0/0", ge=0, le=32, commands=["show ip bgp {target}"])
+    assert rule.validate_target(target, multiple=False) is True
+
+
+def test_directive_ip_rules_reject_zone_and_still_match_family():
+    """A zoned target fails closed; a later valid IPv6 target matches only v6."""
+    directive = Directive(
+        id="ping",
+        name="Ping",
+        field=None,
+        rules=[
+            {"condition": "0.0.0.0/0", "command": "ping {target}"},
+            {"condition": "::/0", "command": "ping ipv6 {target}"},
+        ],
+    )
+    with pytest.raises(InputValidationError):
+        directive.validate_target("2001:db8::1%x foo")
+    with pytest.raises(InputValidationError):
+        directive.validate_target("fe80::1%;id")
+
+    assert directive.validate_target("2001:db8::1") is True
+    passed = [rule._type for rule in directive.rules if rule._passed is True]
+    assert passed == ["ipv6"]
+
+    assert directive.validate_target("192.0.2.1") is True
+    passed = [rule._type for rule in directive.rules if rule._passed is True]
+    assert passed == ["ipv4"]
+
+
 def test_shell_escape_linux_target_neutralizes_substitution():
     r"""Escaped targets keep AS-path anchors but neutralize `$(…)` for bash.
 
     After bash double-quote parsing, `\$` becomes a literal `$`, so vtysh still
     sees `^65000$` while `$(reboot)` cannot execute.
     """
-    # Project
-    from hyperglass.constants import shell_escape_linux_target
-
     assert shell_escape_linux_target("^65000$") == "^65000\\$"
     assert shell_escape_linux_target("$(reboot)") == "\\$(reboot)"
     assert shell_escape_linux_target('a"b') == 'a\\"b'
     assert shell_escape_linux_target("a\\b") == "a\\\\b"
+
+
+def test_canonical_ip_target_drops_zone_and_keeps_host_form():
+    """Normalised addresses omit zone text and do not invent a /32 or /128."""
+    assert canonical_ip_target("192.0.2.1") == "192.0.2.1"
+    assert canonical_ip_target("192.0.2.0/24") == "192.0.2.0/24"
+    assert canonical_ip_target("2001:0db8:0000::0001") == "2001:db8::1"
+    assert canonical_ip_target("2001:db8::/32") == "2001:db8::/32"
+    assert canonical_ip_target("2001:db8::1%x foo") == "2001:db8::1"
+    assert canonical_ip_target("fe80::1%;id") == "fe80::1"
+    assert canonical_ip_target("^65000$") is None
+    assert canonical_ip_target("65000 .* 65001") is None
+    assert canonical_ip_target("65000:100") is None
+    assert canonical_ip_target("192.0.2.0 24") is None
+
+
+def test_quote_shell_command_keeps_injection_payloads_in_one_word():
+    """Shell quoting holds the #383 payloads inside a single argument."""
+    frr = quote_shell_command(
+        'vtysh -c "show bgp ipv4 unicast regexp {target}"',
+        target='_65000"; $(id); echo "',
+    )
+    assert shlex.split(frr) == [
+        "vtysh",
+        "-c",
+        'show bgp ipv4 unicast regexp _65000"; $(id); echo "',
+    ]
+
+    bird = quote_shell_command(
+        "ping -6 -c 5 -I {source6} {target}",
+        source6="2001:db8::1",
+        target="fe80::1%;id",
+    )
+    assert shlex.split(bird) == [
+        "ping",
+        "-6",
+        "-c",
+        "5",
+        "-I",
+        "2001:db8::1",
+        "fe80::1%;id",
+    ]
+
+    zoned = quote_shell_command(
+        "ping -6 -c 5 -I {source6} {target}",
+        source6="2001:db8::1",
+        target="2001:db8::1%x foo",
+    )
+    assert shlex.split(zoned)[-1] == "2001:db8::1%x foo"
+    assert "foo" not in shlex.split(zoned)
 
 
 # Empty-list query target: must be rejected, never a 500. Historically an empty
@@ -242,9 +357,7 @@ def test_query_target_field_rejects_empty_list():
 
 def test_ip_rule_rejects_empty_list():
     """An empty list must raise InputValidationError, not IndexError."""
-    rule = RuleWithIPv4(
-        condition="0.0.0.0/0", ge=0, le=32, commands=["show ip bgp {target}"]
-    )
+    rule = RuleWithIPv4(condition="0.0.0.0/0", ge=0, le=32, commands=["show ip bgp {target}"])
     with pytest.raises(InputValidationError):
         rule.validate_target([], multiple=False)
     # A single-value list is still accepted.

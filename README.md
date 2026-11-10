@@ -15,6 +15,7 @@
 >
 > - **Query-target validation** against CLI injection and forbidden shell metacharacters
 > - **Block `$(…)` / command substitution** on `linux_ssh` device drivers
+> - **Shell-quote** command words for FRR, BIRD, OpenBGPD, and TNSR, and reject IPv6 zone ids (including zone text that contains spaces) on IP targets
 > - **Require a reverse proxy** in front of the app (documented + compose typo fix)
 > - **Shared Redis-backed rate limiter** for multi-worker deployments (not per-process only)
 > - **Lower default query rate limit** (10) and make it env-configurable

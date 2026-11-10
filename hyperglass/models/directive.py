@@ -13,7 +13,7 @@ from hyperglass.log import log
 from hyperglass.util import get_fmt_keys
 from hyperglass.types import Series
 from hyperglass.settings import Settings
-from hyperglass.constants import target_contains_forbidden_content
+from hyperglass.constants import ip_target_has_zone_or_whitespace, target_contains_forbidden_content
 from hyperglass.exceptions.private import InputValidationError
 
 # Local
@@ -140,6 +140,17 @@ class RuleWithIP(Rule):
                 self._passed = False
                 raise InputValidationError(error="Target must be a single value", target=target)
             target = target[0]
+
+        # Zone ids are not looking-glass targets. Python's ipaddress accepts
+        # `addr%zone` and will keep spaces in the zone (`2001:db8::1%x foo`),
+        # which then become extra words on EOS/Cisco lines and on unquoted
+        # ping/bgpctl arguments. Reject `%` and any whitespace before parsing.
+        if target_contains_forbidden_content(target) or ip_target_has_zone_or_whitespace(target):
+            self._passed = False
+            raise InputValidationError(
+                error="IP target contains disallowed character(s)",
+                target=target,
+            )
 
         try:
             # Attempt to use IP object factory to create an IP address object

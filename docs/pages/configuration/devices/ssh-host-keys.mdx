@@ -1,0 +1,67 @@
+import { Callout } from "nextra/components";
+
+By default, Netmiko (and therefore hyperglass) accepts **any** SSH host key a device presents.
+Anyone able to interpose on the path between hyperglass and a router can impersonate the router,
+capture the device credential (if password authentication is used), and return arbitrary output
+to the public looking glass.
+
+<Callout type="warning">
+    hyperglass logs a warning at startup for every SSH device whose `driver_config` does not
+    enable host key verification. Treat that warning as a to-do item for production.
+</Callout>
+
+## Enabling Host Key Verification
+
+Netmiko exposes the relevant options directly, and hyperglass passes `driver_config` through to
+it unchanged:
+
+| Option             | Type    | Description                                                                                   |
+| :----------------- | :------ | :-------------------------------------------------------------------------------------------- |
+| `ssh_strict`       | Boolean | Reject connections whose host key is not already known. **Required** for verification.        |
+| `alt_host_keys`    | Boolean | Load known host keys from `alt_key_file`.                                                     |
+| `alt_key_file`     | String  | Path to a `known_hosts`-format file. Keep it on the hyperglass app path so it survives rebuilds. |
+| `system_host_keys` | Boolean | Alternatively, load the hyperglass process user's `~/.ssh/known_hosts`.                       |
+
+### 1. Record the device host keys
+
+Run this once per device from the host running hyperglass, and review the output against the
+fingerprint shown on the device (`show management ssh hostkey` on Arista EOS, `show ip ssh` on
+Cisco IOS, etc.) before trusting it:
+
+```shell copy
+ssh-keyscan -H 192.0.2.1 >> /etc/hyperglass/known_hosts
+```
+
+When using Docker, `/etc/hyperglass` is already mounted into the container, so the same path works
+inside and outside.
+
+### 2. Reference the file from each device
+
+```yaml filename="devices.yaml" {6-9} copy
+devices:
+    - name: New York, NY
+      address: 192.0.2.1
+      platform: arista_eos
+      credential: { username: hyperglass, key: /etc/hyperglass/id_ed25519 }
+      driver_config:
+          ssh_strict: true
+          alt_host_keys: true
+          alt_key_file: /etc/hyperglass/known_hosts
+```
+
+Restart hyperglass. A device whose key changes (for example after a supervisor replacement)
+will now fail with an authentication error until the `known_hosts` entry is updated.
+
+<Callout type="info">
+    Setting `ssh_strict: true` **without** `alt_host_keys` or `system_host_keys` gives Netmiko
+    nothing to compare against, so every connection is rejected. hyperglass logs a distinct
+    warning for that combination.
+</Callout>
+
+## Related Hardening
+
+- Prefer key-based credentials over passwords, so a captured session cannot yield a reusable
+  secret.
+- Give the hyperglass account a read-only role on the device (for example an EOS `role` that
+  permits only `show`, `ping` and `traceroute`). Even a successful injection or impersonation
+  then has nothing to escalate to.

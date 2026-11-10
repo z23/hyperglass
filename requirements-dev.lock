@@ -14,17 +14,17 @@ aiofiles==23.2.1
     # via hyperglass
 annotated-types==0.6.0
     # via pydantic
-anyio==4.3.0
-    # via httpcore
+anyio==4.15.1
     # via hyperglass
+    # via httpcore
     # via litestar
     # via watchfiles
-async-timeout==4.0.3
-    # via redis
 bandit==1.7.7
+    # via hyperglass
 bcrypt==4.1.2
     # via paramiko
 black==24.2.0
+    # via hyperglass
 brotli==1.1.0
     # via litestar
 certifi==2024.2.2
@@ -57,8 +57,6 @@ editorconfig==0.12.4
     # via jsbeautifier
 faker==24.4.0
     # via polyfactory
-fast-query-parsers==1.0.3
-    # via litestar
 favicons==0.2.2
     # via hyperglass
 filelock==3.13.1
@@ -87,12 +85,15 @@ idna==3.6
 iniconfig==2.0.0
     # via pytest
 isort==5.13.2
+    # via hyperglass
 jinja2==3.1.3
     # via litestar
 jsbeautifier==1.15.1
     # via litestar
-litestar==2.8.3
+litestar==2.24.0
     # via hyperglass
+litestar-htmx==0.5.0
+    # via litestar
 loguru==0.7.2
     # via hyperglass
 lxml==5.1.0
@@ -105,9 +106,11 @@ mccabe==0.7.0
     # via flake8
 mdurl==0.1.2
     # via markdown-it-py
-msgspec==0.18.6
+msgspec==0.22.0
     # via litestar
-multidict==6.0.5
+multidict==7.0.0
+    # via litestar
+multipart==2.0.1
     # via litestar
 mypy-extensions==1.0.0
     # via black
@@ -129,18 +132,20 @@ pathspec==0.12.1
 pbr==6.0.0
     # via stevedore
 pep8-naming==0.13.3
-pillow==10.2.0
-    # via favicons
     # via hyperglass
+pillow==10.2.0
+    # via hyperglass
+    # via favicons
     # via reportlab
 platformdirs==4.2.0
     # via black
     # via virtualenv
 pluggy==1.4.0
     # via pytest
-polyfactory==2.15.0
+polyfactory==3.3.0
     # via litestar
 pre-commit==3.6.2
+    # via hyperglass
 psutil==5.9.4
     # via hyperglass
     # via taskipy
@@ -173,18 +178,21 @@ pynacl==1.5.0
 pyserial==3.5
     # via netmiko
 pytest==8.0.1
+    # via hyperglass
     # via pytest-asyncio
     # via pytest-dependency
 pytest-asyncio==0.23.5
+    # via hyperglass
 pytest-dependency==0.6.0
+    # via hyperglass
 python-dateutil==2.9.0.post0
     # via faker
 python-dotenv==1.0.1
     # via pydantic-settings
     # via uvicorn
 pyyaml==6.0.1
-    # via bandit
     # via hyperglass
+    # via bandit
     # via litestar
     # via netmiko
     # via pre-commit
@@ -195,16 +203,17 @@ reportlab==4.1.0
     # via favicons
     # via svglib
 rich==13.7.0
+    # via hyperglass
     # via bandit
     # via favicons
-    # via hyperglass
     # via litestar
     # via rich-click
-rich-click==1.7.4
+rich-click==1.9.9
     # via litestar
 rlpycairo==0.3.0
     # via favicons
 ruff==0.2.2
+    # via hyperglass
 scp==0.14.5
     # via netmiko
 setuptools==69.1.0
@@ -215,16 +224,18 @@ six==1.16.0
     # via jsbeautifier
     # via python-dateutil
     # via textfsm
-sniffio==1.3.0
-    # via anyio
+sniffio==1.3.1
     # via httpcore
     # via httpx
+    # via litestar
 stackprinter==0.2.11
+    # via hyperglass
 stevedore==5.1.0
     # via bandit
 svglib==1.5.1
     # via favicons
 taskipy==1.12.2
+    # via hyperglass
 tenacity==8.2.3
     # via netmiko
 textfsm==1.1.2
@@ -238,21 +249,20 @@ toml==0.10.2
 tomli==2.0.1
     # via taskipy
 typer==0.9.0
-    # via favicons
     # via hyperglass
-typing-extensions==4.9.0
+    # via favicons
+typing-extensions==4.16.0
+    # via anyio
     # via litestar
     # via polyfactory
     # via pydantic
     # via pydantic-core
-    # via rich-click
     # via typer
 uvicorn==0.21.1
     # via hyperglass
     # via litestar
 uvloop==0.18.0
     # via hyperglass
-    # via litestar
     # via uvicorn
 virtualenv==20.25.0
     # via pre-commit

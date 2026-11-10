@@ -89,6 +89,10 @@ def _proxy_connect_kwargs(proxy: "Proxy", timeout: int) -> t.Dict[str, t.Any]:
 class SSHConnection(Connection):
     """Base class for SSH drivers."""
 
+    # The paramiko client for the SSH proxy hop while `proxy_channel()` is
+    # open, so a request timeout can close it from outside the worker thread.
+    _proxy_client: t.Optional[paramiko.SSHClient] = None
+
     @contextmanager
     def proxy_channel(self) -> t.Iterator[t.Optional[paramiko.Channel]]:
         """Open a channel to the device through its SSH proxy, like OpenSSH's ProxyJump.
@@ -117,6 +121,7 @@ class SSHConnection(Connection):
         _log = log.bind(device=self.device.name, proxy=str(proxy.address))
 
         client = paramiko.SSHClient()
+        self._proxy_client = client
 
         try:
             try:
@@ -180,4 +185,5 @@ class SSHConnection(Connection):
             yield channel
         finally:
             # Closing the client closes its transport and any open channels.
+            self._proxy_client = None
             client.close()

@@ -14,10 +14,12 @@
 > **Hardening & fixes in this fork (vs upstream `main`):**
 >
 > - **Query-target validation** against CLI injection and forbidden shell metacharacters
-> - **Block `$(…)` / command substitution** on `linux_ssh` device drivers
+> - **Block `$(…)` / command substitution** on shell-backed device drivers
+> - **Shell-quote** command words for shell-backed Netmiko classes (`LinuxSSH`, `VyOSSSH`, including VyOS and Cumulus-style aliases) and for FRR, BIRD, and OpenBGPD, and reject IPv6 zone ids (including zone text that contains spaces) on IP targets
 > - **Require a reverse proxy** in front of the app (documented + compose typo fix)
 > - **Shared Redis-backed rate limiter** for multi-worker deployments (not per-process only)
 > - **Lower default query rate limit** (10) and make it env-configurable
+> - **Per-device in-flight query cap** (`max_concurrent_queries`, default 10) and immediate SSH teardown on request timeout, so stalled queries cannot exhaust a router's SSH sessions
 > - **Litestar path-traversal CVE patch** and broader query-API DoS hardening
 > - **Reject empty target lists** with 400 instead of 500; reset stale rule state
 > - **Clean `ParsingError` surfaces** for Arista and FRR (no TypeError-masked 500s)

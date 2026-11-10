@@ -42,6 +42,9 @@ def state() -> t.Generator["HyperglassState", None, None]:
                         "condition": "0.0.0.0/0",
                         "ge": 8,
                         "le": 32,
+                        # The query target below is a documentation prefix,
+                        # which is not globally routable.
+                        "allow_reserved": True,
                         "command": "show route protocol bgp table inet.0 {target} detail",
                     }
                 ],
@@ -88,11 +91,18 @@ def fake_netmiko(monkeypatch: pytest.MonkeyPatch) -> t.Dict[str, t.Any]:
 
     Set `record["send_exc"]` to make `send_command` raise.
     """
-    record: t.Dict[str, t.Any] = {"send_exc": None, "disconnected": False}
+    record: t.Dict[str, t.Any] = {"send_exc": None, "disconnected": False, "opened": False}
 
     class FakeNetmikoSession:
+        remote_conn_pre = None
+
         def __init__(self, **kwargs):
             record["kwargs"] = kwargs
+
+        def _open(self):
+            # The driver constructs with `auto_connect=False` and opens the
+            # session itself so it owns the object during setup.
+            record["opened"] = True
 
         def send_command(self, command, **kwargs):
             if record["send_exc"] is not None:
@@ -126,6 +136,8 @@ def test_collect_via_proxy_passes_channel_as_sock(state, fake_paramiko, fake_net
     # The device connection targets the device itself, not a local forward.
     assert fake_netmiko["kwargs"]["host"] == DEVICE_ADDRESS
     assert fake_netmiko["kwargs"]["port"] == 22
+    assert fake_netmiko["kwargs"]["auto_connect"] is False
+    assert fake_netmiko["opened"] is True
     assert fake_netmiko["disconnected"] is True
     # The proxy client is closed once collection is complete.
     assert client.closed is True
@@ -177,3 +189,46 @@ def test_session_disconnected_on_success(state, fake_paramiko, fake_netmiko):
     connection._collect()
 
     assert fake_netmiko["disconnected"] is True
+
+
+def test_abort_closes_proxy_client_while_session_is_live(
+    state, fake_paramiko, fake_netmiko, monkeypatch
+):
+    """A request timeout must tear down the proxy hop, not only the device session."""
+    device = state.devices["proxied1"]
+    connection = NetmikoConnection(device, make_query("proxied1"))
+    seen: t.Dict[str, t.Any] = {}
+
+    def abort_mid_command(*_: t.Any, **__: t.Any) -> None:
+        # Stands in for `execution.main` aborting from another thread while the
+        # worker is blocked reading from the device.
+        seen["client"] = connection._proxy_client
+        connection.abort()
+        seen["closed_by_abort"] = seen["client"].closed
+        raise ReadTimeout("transport closed")
+
+    monkeypatch.setattr(ssh_netmiko.ConnectHandler, "send_command", abort_mid_command)
+
+    with pytest.raises(DeviceTimeout):
+        connection._collect()
+
+    (client,) = fake_paramiko["clients"]
+    assert seen["client"] is client
+    assert seen["closed_by_abort"] is True
+    assert connection._aborted is True
+    # The handle is cleared once the worker leaves the proxy context.
+    assert connection._proxy_client is None
+    assert fake_netmiko["disconnected"] is True
+
+
+def test_abort_before_dispatch_opens_neither_proxy_nor_device(state, fake_paramiko, fake_netmiko):
+    """A worker that starts after the request timed out must not connect anywhere."""
+    device = state.devices["proxied1"]
+    connection = NetmikoConnection(device, make_query("proxied1"))
+    connection.abort()
+
+    with pytest.raises(DeviceTimeout):
+        connection._collect()
+
+    assert fake_paramiko["clients"] == []
+    assert "kwargs" not in fake_netmiko

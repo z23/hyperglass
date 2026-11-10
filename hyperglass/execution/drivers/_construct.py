@@ -11,14 +11,21 @@ import json as _json
 import typing as t
 import ipaddress
 
+# Third Party
+from netmiko.vyos.vyos_ssh import VyOSSSH
+from netmiko.ssh_dispatcher import CLASS_MAPPER
+from netmiko.linux.linux_ssh import LinuxSSH
+
 # Project
 from hyperglass.log import log
 from hyperglass.util import get_fmt_keys
 from hyperglass.constants import (
-    LINUX_PLATFORMS,
     TRANSPORT_REST,
+    SHELL_PLATFORMS,
     TARGET_FORMAT_SPACE,
-    shell_escape_linux_target,
+    canonical_ip_target,
+    quote_shell_command,
+    ip_target_has_zone_or_whitespace,
     target_contains_forbidden_content,
 )
 from hyperglass.exceptions.public import InputInvalid
@@ -39,7 +46,9 @@ FormatterCallback = t.Callable[[str], t.Union[t.List[str], str]]
 # command. The same forbidden-content check runs at the type-level boundary in
 # `models.api.query`; running it again here means a regression in either the
 # QueryTarget constraint or a custom directive's regex still cannot reach
-# `send_command`. For linux_ssh platforms the target is also shell-escaped.
+# `send_command`. IP targets are canonicalised (and zoned addresses rejected)
+# so a scope id cannot add extra CLI words. Shell platforms then word-quote
+# the command. The forbidden-content denylist rejects `$(` / `${` before that.
 
 
 class Construct:
@@ -99,6 +108,33 @@ class Construct:
             }
         )
 
+    def _resolved_target(self) -> str:
+        """Return the target string that may be interpolated into a command.
+
+        Forbidden characters are rejected on the raw value. A string that
+        parses as an IP is replaced with its canonical form so a raw zone id
+        is never copied into the command; zoned or whitespace IP targets are
+        rejected instead of being queried under the stripped address.
+        """
+        raw = self.target if isinstance(self.target, str) else str(self.target)
+        if target_contains_forbidden_content(raw):
+            raise InputInvalid(
+                error="Target contains disallowed character(s)",
+                target=raw,
+            )
+        if not isinstance(self.target, str):
+            return raw
+
+        canonical = canonical_ip_target(self.target)
+        if canonical is None:
+            return raw
+        if ip_target_has_zone_or_whitespace(self.target):
+            raise InputInvalid(
+                error="IP target contains disallowed character(s)",
+                target=self.target,
+            )
+        return canonical
+
     def format(self, command: str) -> str:
         """Return formatted command for 'Scrape' endpoints (SSH)."""
         keys = get_fmt_keys(command)
@@ -122,22 +158,60 @@ class Construct:
         except ValueError:
             pass
 
-        target_str = str(self.target)
-        if target_contains_forbidden_content(target_str):
-            raise InputInvalid(
-                error="Target contains disallowed character(s)",
-                target=target_str,
-            )
+        target_for_cmd = self._resolved_target()
+        fmt = {"target": target_for_cmd, "mask": mask, **attrs}
 
-        # On linux_ssh platforms the command line is evaluated by bash. Escape
-        # shell metacharacters in the target so AS-path anchors like `$` reach
-        # the tool literally and `$(…)` cannot execute (defense in depth on
-        # top of the forbidden-substring check above).
-        target_for_cmd: t.Union[t.List[str], str] = self.target
-        if self.device.platform in LINUX_PLATFORMS and isinstance(self.target, str):
-            target_for_cmd = shell_escape_linux_target(target_str)
+        # Shell-backed NOS: word-quote the template so the target stays one
+        # literal argument. Single quotes neutralize `$()`, `${}`, quotes,
+        # spaces, and globs. A template operator is a config error; word-quoting
+        # would otherwise turn it into a literal argument.
+        if self._command_is_shell_backed():
+            try:
+                return quote_shell_command(command, **fmt)
+            except ValueError as err:
+                raise ConfigError(
+                    "Command '{c}' on device '{d}' is not a word-quoted shell template ({reason})",
+                    level="danger",
+                    c=self.directive.name,
+                    d=self.device.name,
+                    reason=err,
+                ) from err
 
-        return command.format(target=target_for_cmd, mask=mask, **attrs)
+        return command.format(**fmt)
+
+    def _netmiko_device_type(self) -> t.Optional[str]:
+        """Return the Netmiko device type, or the platform name when unset."""
+        getter = getattr(self.device, "get_device_type", None)
+        if callable(getter):
+            value = getter()
+            if isinstance(value, str) and value:
+                return value
+        platform = getattr(self.device, "platform", None)
+        if isinstance(platform, str) and platform:
+            return platform
+        return None
+
+    def _command_is_shell_backed(self) -> bool:
+        """Return True when this device's command string is parsed by a shell.
+
+        Netmiko classes decide it: a ``LinuxSSH`` or ``VyOSSSH`` subclass
+        (``linux_ssh``, ``vyos_ssh``, ``cumulus_linux``, EdgeRouter, and the
+        other aliases registered in ``CLASS_MAPPER``). An unknown device type
+        does not raise. Hyperglass platforms that are not Netmiko keys
+        (``frr``, ``bird``, ``openbgpd``) still match ``SHELL_PLATFORMS``,
+        because their live device type is ``linux_ssh``.
+        """
+        device_type = self._netmiko_device_type()
+        if device_type is None:
+            return False
+        try:
+            driver = CLASS_MAPPER[device_type]
+        except KeyError:
+            return device_type in SHELL_PLATFORMS
+        try:
+            return issubclass(driver, (LinuxSSH, VyOSSSH))
+        except TypeError:
+            return False
 
     def queries(self):
         """Return queries for each enabled AFI."""

@@ -18,11 +18,12 @@ Each configured device may have the following parameters:
 | `structured_output` | Boolean         | True          | Disable structured output for a device that supports it.                                                                                   |
 | `directives`        | List of Strings |               | Enable referenced directives configured in the [directives config file](/configuration/directives.mdx).                                    |
 | `driver`            | String          | netmiko       | Specify which driver to use for this device. Currently, only `netmiko` is supported.                                                       |
-| `driver_config`     | Mapping         |               | Mapping/dict of options to pass to the connection driver.                                                                                  |
+| `driver_config`     | Mapping         |               | Mapping/dict of options to pass to the connection driver. See [SSH host keys](/configuration/devices/ssh-host-keys.mdx).                 |
 | `attrs`             | Mapping         |               | Mapping/dict of variables, as referenced in configured directives.                                                                         |
 | `credential`        | Mapping         |               | Mapping/dict of a [credential configuration](/configuration/devices/credentials.mdx).                                                      |
 | `http`              | Mapping         |               | Mapping/dict of [HTTP client options](/configuration/devices/http-device.mdx), if this device is connected via HTTP.                       |
 | `proxy`             | Mapping         |               | Mapping/dict of [SSH proxy config](/configuration/devices/ssh-proxy.mdx) to use for this device's requests.                                |
+| `max_concurrent_queries` | Number     | 10            | Maximum queries in flight against this device at once, across all workers. A timed-out or cancelled SSH query still counts until its connection worker finishes cleanup. Further queries get a `503` "device busy" response. |
 
 <Callout type="tip">
 

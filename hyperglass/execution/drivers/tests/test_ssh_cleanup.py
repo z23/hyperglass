@@ -46,8 +46,9 @@ def test_success_preserves_arista_commands_and_disconnects(connection):
     transport.send_command.side_effect = ["IPv4 result", "IPv6 result"]
     assert driver._collect() == ("IPv4 result", "IPv6 result")
     assert [call.args[0] for call in transport.send_command.call_args_list] == list(driver.query)
+    # Arista's 120s read_timeout is clamped to the request budget (90 - 2).
     assert all(
-        call.kwargs == {"read_timeout": 120} for call in transport.send_command.call_args_list
+        call.kwargs == {"read_timeout": 88} for call in transport.send_command.call_args_list
     )
     assert factory.call_args.kwargs["device_type"] == "arista_eos"
     transport.disconnect.assert_called_once_with()
@@ -88,3 +89,60 @@ def test_empty_command_list_still_disconnects(connection):
     with pytest.raises(ResponseEmpty):
         driver._collect()
     transport.disconnect.assert_called_once_with()
+
+
+def test_read_timeout_is_clamped_to_request_budget():
+    assert ssh_netmiko._send_args("arista_eos", 90) == {"read_timeout": 88}
+    # A deployment with a generous request_timeout keeps the Arista ceiling.
+    assert ssh_netmiko._send_args("arista_eos", 300) == {"read_timeout": 120}
+    # Other platforms keep Netmiko's default unless the budget is smaller.
+    assert ssh_netmiko._send_args("cisco_ios", 90) == {"read_timeout": 10}
+    assert ssh_netmiko._send_args("cisco_ios", 8) == {"read_timeout": 6}
+    assert ssh_netmiko._send_args("cisco_ios", 1) == {"read_timeout": 1}
+
+
+def test_abort_closes_live_transport(connection):
+    driver, transport, _ = connection
+    driver._connection = transport
+    driver.abort()
+    transport.remote_conn_pre.close.assert_called_once_with()
+    assert driver._aborted is True
+
+
+def test_abort_before_connection_is_noop_and_blocks_connection(connection):
+    driver, transport, factory = connection
+    driver.abort()  # nothing to close yet
+    transport.remote_conn_pre.close.assert_not_called()
+    # The request has already timed out before the worker started: do not open
+    # an SSH proxy or device session at all.
+    with pytest.raises(DeviceTimeout):
+        driver._collect()
+    factory.assert_not_called()
+    transport.send_command.assert_not_called()
+    transport.disconnect.assert_not_called()
+    assert driver._connection is None
+
+
+def test_abort_during_connection_disconnects_without_sending_commands(connection):
+    driver, transport, _ = connection
+    # The request times out while Netmiko is still establishing the session.
+    transport._open.side_effect = driver.abort
+    with pytest.raises(DeviceTimeout):
+        driver._collect()
+    transport.send_command.assert_not_called()
+    transport.disconnect.assert_called_once_with()
+    assert driver._connection is None
+
+
+def test_abort_failure_is_swallowed(connection):
+    driver, transport, _ = connection
+    transport.remote_conn_pre.close.side_effect = OSError("already closed")
+    driver._connection = transport
+    driver.abort()  # must not raise
+
+
+def test_connection_handle_is_cleared_after_collect(connection):
+    driver, transport, _ = connection
+    transport.send_command.side_effect = ["a", "b"]
+    driver._collect()
+    assert driver._connection is None

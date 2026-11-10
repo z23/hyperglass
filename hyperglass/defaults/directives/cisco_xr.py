@@ -26,11 +26,17 @@ CiscoXR_BGPRoute = BuiltinDirective(
     rules=[
         RuleWithIPv4(
             condition="0.0.0.0/0",
+            allow_reserved=True,
+            allow_unspecified=True,
+            allow_loopback=True,
             action="permit",
             command="show bgp ipv4 unicast {target}",
         ),
         RuleWithIPv6(
             condition="::/0",
+            allow_reserved=True,
+            allow_unspecified=True,
+            allow_loopback=True,
             action="permit",
             command="show bgp ipv6 unicast {target}",
         ),

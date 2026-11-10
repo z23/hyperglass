@@ -29,11 +29,17 @@ JuniperBGPRoute = BuiltinDirective(
     rules=[
         RuleWithIPv4(
             condition="0.0.0.0/0",
+            allow_reserved=True,
+            allow_unspecified=True,
+            allow_loopback=True,
             action="permit",
             command="show route protocol bgp table inet.0 {target} detail",
         ),
         RuleWithIPv6(
             condition="::/0",
+            allow_reserved=True,
+            allow_unspecified=True,
+            allow_loopback=True,
             action="permit",
             command="show route protocol bgp table inet6.0 {target} detail",
         ),
@@ -126,11 +132,17 @@ JuniperBGPRouteTable = BuiltinDirective(
     rules=[
         RuleWithIPv4(
             condition="0.0.0.0/0",
+            allow_reserved=True,
+            allow_unspecified=True,
+            allow_loopback=True,
             action="permit",
             command="show route protocol bgp table inet.0 {target} best detail | display xml",
         ),
         RuleWithIPv6(
             condition="::/0",
+            allow_reserved=True,
+            allow_unspecified=True,
+            allow_loopback=True,
             action="permit",
             command="show route protocol bgp table inet6.0 {target} best detail | display xml",
         ),

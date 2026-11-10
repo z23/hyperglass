@@ -62,6 +62,19 @@ class DeviceTimeout(PublicHyperglassError, template="request_timeout", level="da
         super().__init__(error=str(error), **_device_error_kwargs(device))
 
 
+class DeviceBusy(PublicHyperglassError, template="device_busy", level="warning"):
+    """Raised when a device already has its maximum number of queries in flight."""
+
+    def __init__(self, *, device: "Device", limit: int):
+        """Initialize parent error."""
+        super().__init__(device=device.name, limit=limit)
+
+    @property
+    def status_code(self) -> int:
+        """Service Unavailable: the client should retry shortly."""
+        return 503
+
+
 class InvalidQuery(PublicHyperglassError, template="request_timeout"):
     """Raised when input validation fails."""
 

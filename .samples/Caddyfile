@@ -5,6 +5,11 @@
 # See docs/pages/installation/reverse-proxy.mdx for both startup paths.
 lg.example.com:443 {
     tls person@example.com
+    # Query payloads are tiny; cap request bodies so a client cannot push
+    # oversized JSON at the API. hyperglass also enforces a 16 KiB limit in-app.
+    request_body {
+        max_size 16KB
+    }
     file_server {
             root /etc/hyperglass/static/ui
             index /etc/hyperglass/static/ui/index.html

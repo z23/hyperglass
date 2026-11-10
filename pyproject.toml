@@ -29,7 +29,7 @@ dependencies = [
     "toml>=0.10.2",
     "pydantic-settings>=2.2.1",
     "pydantic-extra-types>=2.6.0",
-    "litestar[standard,brotli]>=2.8.3",
+    "litestar[standard,brotli]>=2.24.0",
 ]
 readme = "README.md"
 requires-python = ">= 3.11"

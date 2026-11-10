@@ -106,7 +106,6 @@ exclude = [
   "hyperglass/ui",
   "hyperglass/plugins/external",
   "hyperglass/api/examples/*.py",
-  "hyperglass/compat/_sshtunnel.py",
 ]
 line-length = 100
 

@@ -54,12 +54,15 @@ def test_success_preserves_arista_commands_and_disconnects(connection):
     transport.disconnect.assert_called_once_with()
 
 
-@pytest.mark.parametrize("error", [RuntimeError("failed"), ReadTimeout("read failed")])
+@pytest.mark.parametrize(
+    ("error", "expected"),
+    [(RuntimeError("failed"), RuntimeError), (ReadTimeout("read failed"), DeviceTimeout)],
+)
 @pytest.mark.parametrize("failed_command", [0, 1])
-def test_command_errors_always_disconnect(connection, error, failed_command):
+def test_command_errors_always_disconnect(connection, error, expected, failed_command):
     driver, transport, _ = connection
     transport.send_command.side_effect = ["result"] * failed_command + [error]
-    with pytest.raises(type(error)):
+    with pytest.raises(expected):
         driver._collect()
     transport.disconnect.assert_called_once_with()
 
@@ -106,12 +109,24 @@ def test_abort_closes_live_transport(connection):
     assert driver._aborted is True
 
 
-def test_abort_before_connection_is_noop_and_blocks_commands(connection):
-    driver, transport, _ = connection
+def test_abort_before_connection_is_noop_and_blocks_connection(connection):
+    driver, transport, factory = connection
     driver.abort()  # nothing to close yet
     transport.remote_conn_pre.close.assert_not_called()
-    # The request has already timed out by the time the connection comes up:
-    # disconnect without sending any command.
+    # The request has already timed out before the worker started: do not open
+    # an SSH proxy or device session at all.
+    with pytest.raises(DeviceTimeout):
+        driver._collect()
+    factory.assert_not_called()
+    transport.send_command.assert_not_called()
+    transport.disconnect.assert_not_called()
+    assert driver._connection is None
+
+
+def test_abort_during_connection_disconnects_without_sending_commands(connection):
+    driver, transport, _ = connection
+    # The request times out while Netmiko is still establishing the session.
+    transport._open.side_effect = driver.abort
     with pytest.raises(DeviceTimeout):
         driver._collect()
     transport.send_command.assert_not_called()

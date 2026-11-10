@@ -50,15 +50,12 @@ async def _collect(driver: "Connection", query: "Query", request_timeout: float)
     # unrelated coroutine.
     try:
         with anyio.fail_after(request_timeout - 1):
-            if query.device.proxy:
-                proxy = driver.setup_proxy()
-                with proxy() as tunnel:
-                    return await driver.collect(tunnel.local_bind_host, tunnel.local_bind_port)
             return await driver.collect()
     except (TimeoutError, anyio.get_cancelled_exc_class()) as timeout_error:
         # The worker thread was abandoned, not stopped. Tear the device session
-        # down now so the device's SSH slot is freed immediately instead of
-        # when Netmiko's own read timeout expires.
+        # (and any SSH proxy session carrying it) down now so the device's SSH
+        # slot is freed immediately instead of when Netmiko's own read timeout
+        # expires.
         abort = getattr(driver, "abort", None)
         if callable(abort):
             with anyio.move_on_after(5, shield=True):

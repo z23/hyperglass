@@ -263,10 +263,10 @@ def blocked_worker(monkeypatch):
             """Return the collected output."""
             return "\n".join(output)
 
-        def _collect(self, host=None, port=None):
+        def _collect(self):
             """Signal completion only after disconnect has returned."""
             try:
-                return super()._collect(host, port)
+                return super()._collect()
             finally:
                 finished.set()
 

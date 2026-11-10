@@ -32,10 +32,6 @@ class HttpClient(Connection):
         self.config = device.http
         self.client = self.config.create_client(device=device)
 
-    def setup_proxy(self: "Connection"):
-        """HTTP Client does not support SSH proxies."""
-        raise NotImplementedError("HTTP Client does not support SSH proxies.")
-
     def _query_params(self) -> t.Dict[str, str]:
         if self.config.query is None:
             return {

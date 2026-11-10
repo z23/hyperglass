@@ -14,6 +14,7 @@ from netmiko import (  # type: ignore
     NetMikoTimeoutException,
     NetMikoAuthenticationException,
 )
+from netmiko.exceptions import ReadException  # type: ignore
 
 # Project
 from hyperglass.log import log
@@ -73,25 +74,37 @@ class NetmikoConnection(SSHConnection):
         makes the worker thread's blocking read fail immediately, so the device
         SSH session is released now instead of when Netmiko's `read_timeout`
         expires. Safe to call before the connection exists: `_collect` checks
-        `_aborted` after connecting and disconnects without sending commands.
+        `_aborted` before connecting to the proxy, and `_run_queries` checks it
+        again around the device connection and disconnects without sending
+        commands.
+
+        When the device is reached through an SSH proxy, the proxy client is
+        closed as well. That unblocks a worker still negotiating with the proxy
+        and tears down the channel carrying the device session.
         """
         self._aborted = True
-        connection = self._connection
-        if connection is None:
-            return
         _log = log.bind(device=self.device.name)
-        try:
-            transport = getattr(connection, "remote_conn_pre", None)
-            if transport is not None:
-                transport.close()
-            else:
-                connection.disconnect()
-            _log.debug("Aborted device session")
-        except Exception as err:  # noqa: BLE001
-            _log.bind(error=str(err)).warning("Failed to abort device session")
+        connection = self._connection
+        if connection is not None:
+            try:
+                transport = getattr(connection, "remote_conn_pre", None)
+                if transport is not None:
+                    transport.close()
+                else:
+                    connection.disconnect()
+                _log.debug("Aborted device session")
+            except Exception as err:  # noqa: BLE001
+                _log.bind(error=str(err)).warning("Failed to abort device session")
+        proxy_client = self._proxy_client
+        if proxy_client is not None:
+            try:
+                proxy_client.close()
+                _log.debug("Aborted SSH proxy session")
+            except Exception as err:  # noqa: BLE001
+                _log.bind(error=str(err)).warning("Failed to abort SSH proxy session")
 
-    async def collect(self, host: str = None, port: int = None) -> Iterable:
-        """Connect directly to a device.
+    async def collect(self) -> Iterable:
+        """Connect to a device, optionally via its SSH proxy.
 
         Netmiko performs blocking, synchronous socket I/O. Running it directly
         on the ASGI event loop would stall every other in-flight request for the
@@ -101,22 +114,20 @@ class NetmikoConnection(SSHConnection):
         expiry. The thread still runs until Netmiko's connection/read operations
         finish; ``session_timeout`` is a lock timeout, not a total deadline.
         """
-        return await anyio.to_thread.run_sync(
-            self._collect_with_slot, host, port, abandon_on_cancel=True
-        )
+        return await anyio.to_thread.run_sync(self._collect_with_slot, abandon_on_cancel=True)
 
-    def _collect_with_slot(self, host: str = None, port: int = None) -> Iterable:
+    def _collect_with_slot(self) -> Iterable:
         """Let the worker own admission for its entire connection lifetime."""
         if self._admission_slot is not None:
-            return self._admission_slot.run(self._collect, host, port)
-        return self._collect(host, port)
+            return self._admission_slot.run(self._collect)
+        return self._collect()
 
-    def _collect(self, host: str = None, port: int = None) -> Iterable:
+    def _collect(self) -> Iterable:
         """Perform the blocking Netmiko device interaction (worker thread)."""
         params = use_state("params")
         _log = log.bind(
             device=self.device.name,
-            address=f"{host}:{port}",
+            address=f"{self.device._target}:{self.device.port}",
             proxy=str(self.device.proxy.address) if self.device.proxy is not None else None,
         )
 
@@ -127,8 +138,8 @@ class NetmikoConnection(SSHConnection):
         send_args = _send_args(self.device.platform, params.request_timeout)
 
         driver_kwargs = {
-            "host": host or self.device._target,
-            "port": port or self.device.port,
+            "host": self.device._target,
+            "port": self.device.port,
             "device_type": self.device.get_device_type(),
             "username": self.device.credential.username,
             "global_delay_factor": 0.1,
@@ -155,42 +166,74 @@ class NetmikoConnection(SSHConnection):
                 # private key password.
                 driver_kwargs["passphrase"] = self.device.credential.password.get_secret_value()
 
+        if self._aborted:
+            # The request timed out before this worker was dispatched. Do not
+            # open a proxy or device session nobody is waiting for.
+            raise DeviceTimeout(
+                error=TimeoutError("Request timed out before connection"),
+                device=self.device,
+            )
+
+        with self.proxy_channel() as proxy_sock:
+            if proxy_sock is not None:
+                # Set after the `driver_config` spread so user-supplied driver
+                # config cannot replace the proxy channel.
+                driver_kwargs["sock"] = proxy_sock
+
+            responses = self._run_queries(driver_kwargs, send_args)
+
+        if not responses:
+            raise ResponseEmpty(query=self.query_data)
+
+        return responses
+
+    def _run_queries(self, driver_kwargs: dict, send_args: dict) -> Iterable:
+        """Run this connection's queries over a Netmiko session, always disconnecting."""
+        session = None
+        responses = ()
+
         try:
             # Netmiko's constructor normally opens the connection before it
             # returns. Some failures (e.g. invoke_shell) bypass its cleanup.
             # Retain the object first and run its same setup sequence ourselves.
-            nm_connect_direct = ConnectHandler(**{**driver_kwargs, "auto_connect": False})
-            self._connection = nm_connect_direct
+            session = ConnectHandler(**{**driver_kwargs, "auto_connect": False})
+            self._connection = session
 
-            responses = ()
+            if self._aborted:
+                raise DeviceTimeout(
+                    error=TimeoutError("Request timed out before connection"),
+                    device=self.device,
+                )
+            session._open()
+            if self._aborted:
+                # The request timed out while we were still connecting.
+                raise DeviceTimeout(
+                    error=TimeoutError("Request timed out during connection"),
+                    device=self.device,
+                )
 
-            try:
-                if self._aborted:
-                    raise DeviceTimeout(
-                        error=TimeoutError("Request timed out before connection"),
-                        device=self.device,
-                    )
-                nm_connect_direct._open()
-                if self._aborted:
-                    # The request timed out while we were still connecting.
-                    raise DeviceTimeout(
-                        error=TimeoutError("Request timed out during connection"),
-                        device=self.device,
-                    )
-                for query in self.query:
-                    raw = nm_connect_direct.send_command(query, **send_args)
-                    responses += (raw,)
-            finally:
-                self._connection = None
-                nm_connect_direct.disconnect()
+            for query in self.query:
+                raw = session.send_command(query, **send_args)
+                responses += (raw,)
 
         except NetMikoTimeoutException as scrape_error:
             raise DeviceTimeout(error=scrape_error, device=self.device) from scrape_error
 
+        except ReadException as read_error:
+            # Netmiko raises `send_command` read timeouts as ReadTimeout
+            # (a ReadException), not as NetMikoTimeoutException.
+            raise DeviceTimeout(error=read_error, device=self.device) from read_error
+
         except NetMikoAuthenticationException as auth_error:
             raise AuthError(error=auth_error, device=self.device) from auth_error
 
-        if not responses:
-            raise ResponseEmpty(query=self.query_data)
+        finally:
+            self._connection = None
+            if session is not None:
+                try:
+                    session.disconnect()
+                except Exception:  # noqa: BLE001
+                    # Never let disconnect cleanup mask the real error.
+                    log.bind(device=self.device.name).debug("Error disconnecting from device")
 
         return responses

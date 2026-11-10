@@ -165,7 +165,19 @@ class Construct:
         # literal argument. Single quotes neutralize `$()`, `${}`, quotes,
         # spaces, and globs. A template operator is a config error; word-quoting
         # would otherwise turn it into a literal argument.
-        if self._command_is_shell_backed():
+        shell_backed = self._command_is_shell_backed()
+
+        if not shell_backed and "?" in target_for_cmd:
+            # On an interactive device CLI `?` is the context-help key, not
+            # text. The device prints help and redraws the line without it, so
+            # the command never runs and the session is held until the read
+            # timeout. Shell-backed platforms receive it inside quotes.
+            raise InputInvalid(
+                error="Target contains disallowed character(s)",
+                target=target_for_cmd,
+            )
+
+        if shell_backed:
             try:
                 return quote_shell_command(command, **fmt)
             except ValueError as err:

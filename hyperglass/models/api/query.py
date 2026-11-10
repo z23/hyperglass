@@ -15,7 +15,7 @@ from hyperglass.log import log
 from hyperglass.util import snake_to_camel, repr_from_attrs
 from hyperglass.state import use_state
 from hyperglass.plugins import InputPluginManager
-from hyperglass.constants import target_contains_forbidden_content
+from hyperglass.constants import MAX_QUERY_TARGETS, target_contains_forbidden_content
 from hyperglass.exceptions.public import InputInvalid, QueryTypeNotFound, QueryLocationNotFound
 from hyperglass.exceptions.private import InputValidationError
 
@@ -70,7 +70,12 @@ class Query(BaseModel):
     # `min_length=1` rejects an empty target list at model validation (a clean
     # 400) instead of letting it reach rule validation, where it would raise an
     # uncaught IndexError -> HTTP 500.
-    query_target: t.Union[Annotated[t.List[QueryTarget], Field(min_length=1)], QueryTarget]
+    # `max_length` bounds how many values one request can make a directive
+    # validate and join into a single device command.
+    query_target: t.Union[
+        Annotated[t.List[QueryTarget], Field(min_length=1, max_length=MAX_QUERY_TARGETS)],
+        QueryTarget,
+    ]
 
     # Directive `id` field
     query_type: QueryType

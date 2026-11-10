@@ -17,7 +17,22 @@ if t.TYPE_CHECKING:
     # Project
     from hyperglass.models.config.params import Params
 
-__all__ = ("send_webhook",)
+__all__ = ("send_webhook", "client_host")
+
+
+def client_host(request: Request) -> str:
+    """Return the client address as resolved by the ASGI server.
+
+    Uvicorn's ``ProxyHeadersMiddleware`` already rewrites ``request.client`` from
+    ``X-Forwarded-For`` *only* when the connecting peer is listed in
+    ``FORWARDED_ALLOW_IPS``. Reading ``X-Real-IP`` / ``X-Forwarded-For`` directly
+    from the request would bypass that trust decision and let any client choose
+    the source address that is logged, reported in webhooks, and looked up
+    against bgp.tools.
+    """
+    if request.client is not None and request.client.host:
+        return request.client.host
+    return "Unknown"
 
 
 async def process_headers(headers: Headers) -> t.Dict[str, t.Any]:
@@ -45,12 +60,10 @@ async def send_webhook(
         if params.logging.http is not None:
             headers = await process_headers(headers=request.headers)
 
-            if headers.get("x-real-ip") is not None:
-                host = headers["x-real-ip"]
-            elif headers.get("x-forwarded-for") is not None:
-                host = headers["x-forwarded-for"]
-            else:
-                host = request.client.host
+            # The forwarding headers are kept in the webhook payload for
+            # information only; the source address must come from the
+            # trusted-proxy-resolved ASGI client.
+            host = client_host(request)
 
             network_info = await bgptools.network_info(host)
 

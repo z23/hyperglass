@@ -16,6 +16,7 @@ These pin the guarantees of the rate-limit config:
 # Standard Library
 import re
 import time
+from types import SimpleNamespace
 import uuid
 import shutil
 import asyncio
@@ -37,6 +38,11 @@ from litestar.testing import TestClient
 from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 # Project
+from hyperglass.rate_limit import (
+    IPV6_CLIENT_PREFIX_LENGTH,
+    QueryRateLimitMiddleware,
+    client_budget_key,
+)
 from hyperglass.models.config.rate_limit import (
     RATE_LIMIT_EXCLUDE,
     RATE_LIMIT_STORE_NAME,
@@ -398,3 +404,75 @@ def test_other_config_fields_take_precedence_over_env(monkeypatch, key, value):
     monkeypatch.setenv("HYPERGLASS_RATE_LIMIT_PERIOD", "day")
     monkeypatch.setenv("HYPERGLASS_RATE_LIMIT_ENABLE", "true")
     assert getattr(RateLimit(**{key: value}), key) == value
+
+
+@pytest.mark.parametrize(
+    ("host", "expected"),
+    [
+        ("192.0.2.10", "192.0.2.10"),
+        ("2001:db8:1:2::1", "2001:db8:1:2::/64"),
+        ("2001:db8:1:2:ffff:ffff:ffff:ffff", "2001:db8:1:2::/64"),
+        ("2001:0DB8:0001:0002:0000:0000:0000:0001", "2001:db8:1:2::/64"),
+        ("2001:db8:1:3::1", "2001:db8:1:3::/64"),
+        ("fe80::1%eth0", "fe80::/64"),
+        ("::1", "::/64"),
+        ("::ffff:192.0.2.10", "192.0.2.10"),
+        ("testclient", "testclient"),
+        ("", ""),
+    ],
+)
+def test_client_budget_key(host, expected):
+    assert client_budget_key(host) == expected
+
+
+def test_ipv6_client_prefix_is_a_64():
+    assert IPV6_CLIENT_PREFIX_LENGTH == 64
+
+
+def _cache_key(host):
+    middleware = SimpleNamespace(unit="minute")
+    request = SimpleNamespace(client=SimpleNamespace(host=host) if host is not None else None)
+    return QueryRateLimitMiddleware.cache_key_from_request(middleware, request)
+
+
+def test_addresses_in_one_ipv6_64_share_a_budget():
+    """Rotating through a /64 must not hand out a fresh budget per address."""
+    keys = {_cache_key(f"2001:db8:1:2::{n:x}") for n in range(1, 200)}
+    assert keys == {"query-rate-limit:v1:minute:2001:db8:1:2::/64"}
+    assert _cache_key("2001:db8:1:3::1") not in keys
+
+
+def test_ipv4_clients_keep_separate_budgets():
+    assert _cache_key("192.0.2.10") == "query-rate-limit:v1:minute:192.0.2.10"
+    assert _cache_key("192.0.2.10") != _cache_key("192.0.2.11")
+    assert _cache_key("::ffff:192.0.2.10") == _cache_key("192.0.2.10")
+
+
+def test_missing_client_is_one_shared_budget():
+    assert _cache_key(None) == "query-rate-limit:v1:minute:anonymous"
+
+
+def test_rotating_ipv6_addresses_are_admitted_against_one_counter(monkeypatch):
+    """Through the middleware: 200 addresses in a /64 consume one allowance."""
+    counts = {}
+    store = RateLimit.redis_store("redis://localhost:6379/1")
+
+    async def admit(key, limit, duration):
+        counts[key] = counts.get(key, 0) + 1
+        return counts[key] <= limit, counts[key], duration * 1000
+
+    monkeypatch.setattr(store, "admit", admit)
+    app = _limited_app(store)
+
+    async def run():
+        codes = []
+        for n in range(1, 13):
+            transport = ASGITransport(app=app, client=(f"2001:db8:1:2::{n:x}", 40000 + n))
+            async with AsyncClient(transport=transport, base_url="http://lg.test") as client:
+                codes.append((await client.post("/api/query")).status_code)
+        return codes
+
+    codes = asyncio.run(run())
+    # `_limited_app` allows 2 per minute: one allowance for the whole /64.
+    assert codes == [201, 201] + [429] * 10
+    assert list(counts) == ["query-rate-limit:v1:minute:2001:db8:1:2::/64"]

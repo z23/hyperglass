@@ -3,6 +3,7 @@
 # Standard Library
 import math
 import typing as t
+from ipaddress import ip_address, ip_network
 
 # Third Party
 from litestar.stores.redis import RedisStore
@@ -31,6 +32,37 @@ return {1, redis.call('INCR', KEYS[1]), ttl}
 """
 
 
+# An IPv6 client is budgeted by its /64, not by its address. A /64 is the
+# smallest subnet a single host or customer is normally given, and whoever
+# holds one can source requests from 2^64 addresses; counting each address
+# separately would give every IPv6 client an effectively unlimited budget.
+IPV6_CLIENT_PREFIX_LENGTH = 64
+
+
+def client_budget_key(host: str) -> str:
+    """Reduce a client address to the identity its request budget is counted against.
+
+    - IPv4: the address itself.
+    - IPv6: the enclosing /64, without any zone ID.
+    - IPv4-mapped IPv6 (`::ffff:192.0.2.1`): the IPv4 address, so a client
+      shares one budget however the listener reports it.
+    - Anything that is not an IP address (a Unix socket peer, a test client
+      name): the value unchanged.
+    """
+    try:
+        address = ip_address(host.split("%", 1)[0])
+    except ValueError:
+        return host
+
+    if address.version == 4:
+        return str(address)
+
+    if address.ipv4_mapped is not None:
+        return str(address.ipv4_mapped)
+
+    return str(ip_network((address, IPV6_CLIENT_PREFIX_LENGTH), strict=False))
+
+
 class RateLimitStore(RedisStore):
     """Redis store with atomic admission across processes, not just shared data."""
 
@@ -53,7 +85,7 @@ class QueryRateLimitMiddleware(RateLimitMiddleware):
 
     def cache_key_from_request(self, request: "Request") -> str:
         """Use the server-resolved client, never untrusted forwarding headers."""
-        host = request.client.host if request.client else "anonymous"
+        host = client_budget_key(request.client.host) if request.client else "anonymous"
         # Separate schema from the old middleware's JSON histories on rollout.
         return f"query-rate-limit:v1:{self.unit}:{host}"
 

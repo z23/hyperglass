@@ -33,6 +33,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Internal errors (configuration, parsing, plugin, state) are answered with the generic error message and HTTP 500 instead of their own text.
 - A `connection_error` message no longer repeats its detail in parentheses, and a Junos `xnm:error` reply is reported as a parsing error instead of raising a `TypeError`.
 - [#306](https://github.com/thatmattlove/hyperglass/issues/306): Fix: allow integer values in ext_community_list_raw field for Arista BGP - @cooperwinser
+- The query rate limiter budgets an IPv6 client by its `/64` instead of by its address, so a client can no longer avoid the limit by rotating source addresses within its own prefix. IPv4-mapped IPv6 addresses share the IPv4 address's budget.
 - [#311](https://github.com/thatmattlove/hyperglass/issues/311): Fix: device and directive errors.
 - [#315](https://github.com/thatmattlove/hyperglass/issues/315): Impossibile to use command "BGP Route" with Huawei NetEngine 8000 
 - [#315](https://github.com/thatmattlove/hyperglass/issues/187): Error in bgp_router query on Huawei

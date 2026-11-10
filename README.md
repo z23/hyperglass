@@ -18,6 +18,7 @@
 > - **Require a reverse proxy** in front of the app (documented + compose typo fix)
 > - **Shared Redis-backed rate limiter** for multi-worker deployments (not per-process only)
 > - **Lower default query rate limit** (10) and make it env-configurable
+> - **Per-device in-flight query cap** (`max_concurrent_queries`, default 10) and immediate SSH teardown on request timeout, so stalled queries cannot exhaust a router's SSH sessions
 > - **Litestar path-traversal CVE patch** and broader query-API DoS hardening
 > - **Reject empty target lists** with 400 instead of 500; reset stale rule state
 > - **Clean `ParsingError` surfaces** for Arista and FRR (no TypeError-masked 500s)

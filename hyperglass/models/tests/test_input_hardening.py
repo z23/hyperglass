@@ -43,6 +43,10 @@ from ..directive import Directive, RuleWithPattern, RuleWithIPv4
         "65000$(id)",
         "${PATH}",
         "65000${IFS}id",
+        # `?` is the CLI help key on EOS/IOS: the echoed command no longer
+        # matches and Netmiko holds the session until read_timeout (issue #19).
+        "^65000?",
+        "?",
     ],
 )
 def test_wildcard_pattern_rejects_metachars(target):
@@ -195,9 +199,7 @@ def test_check_query_target_rejects_even_when_rule_would_permit():
     layers hard-block forbidden content so a custom permissive condition cannot
     re-open the injection path.
     """
-    permissive_rule = RuleWithPattern(
-        condition=r".*", action="permit", commands=["show {target}"]
-    )
+    permissive_rule = RuleWithPattern(condition=r".*", action="permit", commands=["show {target}"])
     target = "1.1.1.1;reboot"
     # Layer-2 now hard-blocks forbidden content even for custom regexes:
     assert permissive_rule.validate_target(target, multiple=False) is False
@@ -242,9 +244,7 @@ def test_query_target_field_rejects_empty_list():
 
 def test_ip_rule_rejects_empty_list():
     """An empty list must raise InputValidationError, not IndexError."""
-    rule = RuleWithIPv4(
-        condition="0.0.0.0/0", ge=0, le=32, commands=["show ip bgp {target}"]
-    )
+    rule = RuleWithIPv4(condition="0.0.0.0/0", ge=0, le=32, commands=["show ip bgp {target}"])
     with pytest.raises(InputValidationError):
         rule.validate_target([], multiple=False)
     # A single-value list is still accepted.

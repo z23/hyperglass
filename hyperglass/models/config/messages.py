@@ -56,6 +56,11 @@ class Messages(HyperglassModel):
         title="Not Found",
         description="Displayed when an object property does not exist in the configuration. `{type}` corresponds to a user-friendly name of the object type (for example, 'Device'), `{name}` corresponds to the object name that was not found.",
     )
+    device_busy: str = Field(
+        "{device} is busy with other queries. Please try again in a moment.",
+        title="Device Busy",
+        description="Displayed when a device already has `max_concurrent_queries` queries in flight. `{device}` may be used to display the device name.",
+    )
     request_timeout: str = Field(
         "Request timed out.",
         title="Request Timeout",

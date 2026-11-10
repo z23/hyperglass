@@ -81,7 +81,7 @@ def parse_juniper(output: Sequence[str]) -> "OutputDataModel":  # noqa: C901
                 if "xnm:error" in parsed["rpc-reply"]:
                     if "message" in parsed["rpc-reply"]["xnm:error"]:
                         err = parsed["rpc-reply"]["xnm:error"]["message"]
-                        raise ParsingError('Error from device: "{}"', err)
+                        raise ParsingError("Error from device: {error}", error=err)
 
                 parsed_base = parsed["rpc-reply"]["route-information"]
             elif "route-information" in parsed.keys():

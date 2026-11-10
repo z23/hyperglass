@@ -29,6 +29,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Reject `?` in targets sent to interactive device CLIs (it is the help key and stalls the session), and reject non-ASCII control, format and separator characters in all targets.
 - Word-quote query targets for Netmiko `LinuxSSH` and `VyOSSSH` device classes (VyOS, Cumulus, `linux` / `linux_ssh`, and the other registered aliases) plus FRR, BIRD, and OpenBGPD. Reject shell operators in those templates, and reject IPv6 zone identifiers (including zone text with spaces). See upstream [#383](https://github.com/thatmattlove/hyperglass/issues/383).
 - [#280](https://github.com/thatmattlove/hyperglass/issues/280): Fix: `condition: None` caused error in directive @Jimmy01240397
+- Device connection, authentication, timeout and HTTP errors returned by the API now carry a fixed description instead of the underlying library's error text, which included the device's management address, port and platform (Netmiko's `Device settings: ...`), its prompt, or the HTTP driver's request URL. The full error is logged server-side.
+- Internal errors (configuration, parsing, plugin, state) are answered with the generic error message and HTTP 500 instead of their own text.
+- A `connection_error` message no longer repeats its detail in parentheses, and a Junos `xnm:error` reply is reported as a parsing error instead of raising a `TypeError`.
 - [#306](https://github.com/thatmattlove/hyperglass/issues/306): Fix: allow integer values in ext_community_list_raw field for Arista BGP - @cooperwinser
 - [#311](https://github.com/thatmattlove/hyperglass/issues/311): Fix: device and directive errors.
 - [#315](https://github.com/thatmattlove/hyperglass/issues/315): Impossibile to use command "BGP Route" with Huawei NetEngine 8000 

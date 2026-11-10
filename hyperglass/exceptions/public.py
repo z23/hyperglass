@@ -3,6 +3,9 @@
 # Standard Library
 from typing import TYPE_CHECKING, Any, Dict, Union, Optional
 
+# Project
+from hyperglass.log import log
+
 # Local
 from ._common import PublicHyperglassError
 
@@ -26,6 +29,57 @@ def _device_error_kwargs(device: "Device") -> Dict[str, Any]:
     return {"device": device.name, "device_name": device.name}
 
 
+# Exception class names, matched against the error's MRO so this module does
+# not import the SSH and HTTP client libraries. Checked in order.
+_PUBLIC_ERROR_DETAILS = (
+    (("NetmikoAuthenticationException", "AuthenticationException"), "Authentication failed"),
+    (("ReadTimeout", "ReadException"), "Timed out waiting for the device to respond"),
+    (("NetmikoTimeoutException",), "Connection to the device failed or timed out"),
+    (("TimeoutException", "TimeoutError"), "Connection timed out"),
+)
+
+
+def _public_error_detail(error: Union[BaseException, str]) -> str:
+    """Describe a device failure without repeating the library's own error text.
+
+    Public errors are returned to anonymous API clients, and the underlying
+    libraries describe failures in terms of the thing that failed: Netmiko
+    appends `Device settings: <device_type> <address>:<port>` to connection and
+    authentication errors and puts the device prompt (its hostname) in read
+    timeouts, and httpx includes the full request URL. None of that is the
+    client's business, so only a fixed description is exposed.
+
+    A string is passed through unchanged: the caller has already chosen wording
+    that is safe to publish (for example the SSH proxy descriptions).
+    """
+    if isinstance(error, str):
+        return error
+
+    names = {cls.__name__ for cls in type(error).__mro__}
+
+    for candidates, detail in _PUBLIC_ERROR_DETAILS:
+        if names.intersection(candidates):
+            return detail
+
+    if "HTTPStatusError" in names:
+        status_code = getattr(getattr(error, "response", None), "status_code", None)
+        if isinstance(status_code, int):
+            return f"Device returned HTTP status {status_code}"
+
+    return "Connection failed"
+
+
+def _device_error(error: Union[BaseException, str], device: "Device") -> str:
+    """Log the full device error server-side and return its public description."""
+    if not isinstance(error, str):
+        log.bind(
+            device=getattr(device, "name", None),
+            error_type=type(error).__name__,
+            detail=str(error),
+        ).error("Device error")
+    return _public_error_detail(error)
+
+
 class ScrapeError(
     PublicHyperglassError,
     template="connection_error",
@@ -35,7 +89,7 @@ class ScrapeError(
 
     def __init__(self, *, error: Union[BaseException, str], device: "Device"):
         """Initialize parent error."""
-        super().__init__(error=str(error), **_device_error_kwargs(device))
+        super().__init__(error=_device_error(error, device), **_device_error_kwargs(device))
 
 
 class AuthError(PublicHyperglassError, template="authentication_error", level="danger"):
@@ -43,15 +97,15 @@ class AuthError(PublicHyperglassError, template="authentication_error", level="d
 
     def __init__(self, *, error: Union[BaseException, str], device: "Device"):
         """Initialize parent error."""
-        super().__init__(error=str(error), **_device_error_kwargs(device))
+        super().__init__(error=_device_error(error, device), **_device_error_kwargs(device))
 
 
 class RestError(PublicHyperglassError, template="connection_error", level="danger"):
     """Raised upon a rest API client error."""
 
-    def __init__(self, *, error: BaseException, device: "Device"):
+    def __init__(self, *, error: Union[BaseException, str], device: "Device"):
         """Initialize parent error."""
-        super().__init__(error=str(error), device=device.name, device_name=device.name)
+        super().__init__(error=_device_error(error, device), **_device_error_kwargs(device))
 
 
 class DeviceTimeout(PublicHyperglassError, template="request_timeout", level="danger"):
@@ -59,7 +113,7 @@ class DeviceTimeout(PublicHyperglassError, template="request_timeout", level="da
 
     def __init__(self, *, error: Union[BaseException, str], device: "Device"):
         """Initialize parent error."""
-        super().__init__(error=str(error), **_device_error_kwargs(device))
+        super().__init__(error=_device_error(error, device), **_device_error_kwargs(device))
 
 
 class DeviceBusy(PublicHyperglassError, template="device_busy", level="warning"):

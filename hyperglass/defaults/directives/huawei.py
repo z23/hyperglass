@@ -26,11 +26,17 @@ Huawei_BGPRoute = BuiltinDirective(
     rules=[
         RuleWithIPv4(
             condition="0.0.0.0/0",
+            allow_reserved=True,
+            allow_unspecified=True,
+            allow_loopback=True,
             action="permit",
             command="display bgp routing-table {target} | no-more",
         ),
         RuleWithIPv6(
             condition="::/0",
+            allow_reserved=True,
+            allow_unspecified=True,
+            allow_loopback=True,
             action="permit",
             command="display bgp ipv6 routing-table {target} | no-more",
         ),

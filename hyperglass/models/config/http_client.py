@@ -1,6 +1,7 @@
 """Configuration models for hyperglass http client."""
 
 # Standard Library
+import ssl
 import typing as t
 
 # Third Party
@@ -92,7 +93,9 @@ class HttpConfiguration(HyperglassModel):
         # Use the CA certificates for SSL verification, if present.
         verify = self.verify_ssl
         if self.ssl_ca is not None:
-            verify = httpx.create_ssl_context(verify=str(self.ssl_ca))
+            # Trust only the configured CA file. (httpx 0.28 deprecates passing
+            # a path to `create_ssl_context`.)
+            verify = ssl.create_default_context(cafile=str(self.ssl_ca))
 
         transport_constructor = {"retries": self.retries}
 

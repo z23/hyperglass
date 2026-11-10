@@ -10,6 +10,7 @@ from litestar.exceptions import HTTPException, ValidationException
 # Project
 from hyperglass.log import log
 from hyperglass.state import use_state
+from hyperglass.exceptions import PublicHyperglassError
 
 __all__ = (
     "default_handler",
@@ -63,10 +64,23 @@ def http_handler(request: Request, exc: HTTPException) -> Response:
 
 
 def app_handler(request: Request, exc: BaseException) -> Response:
-    """Handle application errors."""
+    """Handle application errors.
+
+    Only public errors carry text written for API clients. Every other
+    hyperglass error (configuration, parsing, plugin, state) is an internal
+    fault whose message can name devices, attributes, file paths or raw device
+    output, so the client receives the generic message and the detail stays in
+    the log.
+    """
     log.bind(method=request.method, path=request.url.path, detail=exc.message).critical(
         "hyperglass Error"
     )
+    if not isinstance(exc, PublicHyperglassError):
+        state = use_state()
+        return Response(
+            {"output": state.params.messages.general, "level": "danger", "keywords": []},
+            status_code=500,
+        )
     return Response(
         {"output": exc.message, "level": exc.level, "keywords": exc.keywords},
         status_code=exc.status_code,

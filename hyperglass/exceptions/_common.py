@@ -156,7 +156,9 @@ class PublicHyperglassError(HyperglassError):
         (messages := use_state("params").messages)
         if messages.has(self._original_template_name):
             template = messages[self._original_template_name]
-        if "error" in kwargs and "({error})" not in template:
+        if "error" in kwargs and "{error}" not in template:
+            # Append the detail only when the template does not place it
+            # itself; otherwise it is rendered twice.
             template += " ({error})"
         self._message = self._safe_format(template, **kwargs)
         self._keywords = list(kwargs.values())

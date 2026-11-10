@@ -37,11 +37,17 @@ AristaBGPRoute = BuiltinDirective(
     rules=[
         RuleWithIPv4(
             condition="0.0.0.0/0",
+            allow_reserved=True,
+            allow_unspecified=True,
+            allow_loopback=True,
             action="permit",
             command="show ip bgp {target}",
         ),
         RuleWithIPv6(
             condition="::/0",
+            allow_reserved=True,
+            allow_unspecified=True,
+            allow_loopback=True,
             action="permit",
             command="show ipv6 bgp {target}",
         ),
@@ -134,11 +140,17 @@ AristaBGPRouteTable = BuiltinDirective(
     rules=[
         RuleWithIPv4(
             condition="0.0.0.0/0",
+            allow_reserved=True,
+            allow_unspecified=True,
+            allow_loopback=True,
             action="permit",
             command="show ip bgp {target} | json",
         ),
         RuleWithIPv6(
             condition="::/0",
+            allow_reserved=True,
+            allow_unspecified=True,
+            allow_loopback=True,
             action="permit",
             command="show ipv6 bgp {target} | json",
         ),
@@ -190,11 +202,17 @@ AristaBGPRouteVRF = BuiltinDirective(
     rules=[
         RuleWithIPv4(
             condition="0.0.0.0/0",
+            allow_reserved=True,
+            allow_unspecified=True,
+            allow_loopback=True,
             action="permit",
             command="show ip bgp {target} vrf {vrf}",
         ),
         RuleWithIPv6(
             condition="::/0",
+            allow_reserved=True,
+            allow_unspecified=True,
+            allow_loopback=True,
             action="permit",
             command="show ipv6 bgp {target} vrf {vrf}",
         ),
@@ -284,11 +302,17 @@ AristaBGPRouteVRFTable = BuiltinDirective(
     rules=[
         RuleWithIPv4(
             condition="0.0.0.0/0",
+            allow_reserved=True,
+            allow_unspecified=True,
+            allow_loopback=True,
             action="permit",
             command="show ip bgp {target} vrf {vrf} | json",
         ),
         RuleWithIPv6(
             condition="::/0",
+            allow_reserved=True,
+            allow_unspecified=True,
+            allow_loopback=True,
             action="permit",
             command="show ipv6 bgp {target} vrf {vrf} | json",
         ),

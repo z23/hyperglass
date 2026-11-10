@@ -47,6 +47,16 @@ queries while the new cache warms. Existing keys are left to expire; no database
 flush is required. Older workers must be drained because they still serve the
 old output cache and use the old limiter.
 
+## Request body limits
+
+The pinned Litestar release reads request bodies into memory without a size limit
+([PYSEC-2024-178](https://osv.dev/vulnerability/PYSEC-2024-178)). hyperglass enforces its
+own 16 KiB limit on every HTTP request body and answers `413` beyond it, which is far more than
+any query needs. Mirror that limit at the proxy as well so oversized payloads are dropped before
+they reach the application: the Caddy sample sets `request_body { max_size 16KB }` and the NGINX
+sample sets `client_max_body_size 16k` on `/api`. Caddy has **no** default body limit, so do not
+omit this when writing your own Caddyfile.
+
 [Caddy](https://caddyserver.com) is recommended, but any reverse proxy ([NGINX](https://www.nginx.com), [Apache2](https://httpd.apache.org)) will work.
 
 ## Caddy

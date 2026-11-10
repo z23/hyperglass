@@ -26,11 +26,17 @@ Mikrotik_BGPRoute = BuiltinDirective(
     rules=[
         RuleWithIPv4(
             condition="0.0.0.0/0",
+            allow_reserved=True,
+            allow_unspecified=True,
+            allow_loopback=True,
             action="permit",
             command="ip route print where {target} in dst-address",
         ),
         RuleWithIPv6(
             condition="::/0",
+            allow_reserved=True,
+            allow_unspecified=True,
+            allow_loopback=True,
             action="permit",
             command="ipv6 route print where {target} in dst-address",
         ),

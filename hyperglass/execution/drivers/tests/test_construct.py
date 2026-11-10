@@ -8,7 +8,7 @@ import pytest
 
 # Project
 from hyperglass.state import use_state
-from hyperglass.constants import quote_shell_command
+from hyperglass.constants import SHELL_PLATFORMS, quote_shell_command
 from hyperglass.models.api import Query
 from hyperglass.configuration import init_ui_params
 from hyperglass.models.directive import Directives
@@ -39,7 +39,7 @@ def devices():
             "credential": {"username": "", "password": ""},
             "platform": "juniper",
             "attrs": {"source4": "192.0.2.1", "source6": "2001:db8::1"},
-            "directives": ["juniper_bgp_route"],
+            "directives": ["juniper_bgp_route", "permissive_show"],
         }
     ]
 
@@ -51,7 +51,12 @@ def directives():
             "juniper_bgp_route": {
                 "name": "BGP Route",
                 "field": {"description": "test"},
-            }
+            },
+            "permissive_show": {
+                "name": "Show",
+                "field": {"description": "test"},
+                "rules": [{"condition": None, "command": "show {target}"}],
+            },
         }
     ]
 
@@ -189,10 +194,34 @@ def _format(state, platform: str, command: str, target: str) -> str:
             "bgpctl show rib inet 192.0.2.0/24",
         ),
         (
-            "tnsr",
-            'dataplane shell sudo vtysh -c "show bgp ipv4 unicast regexp {target}"',
+            "vyos",
+            'show bgp ipv4 regexp "{target}"',
             "^65000$",
-            "dataplane shell sudo vtysh -c 'show bgp ipv4 unicast regexp ^65000$'",
+            "show bgp ipv4 regexp '^65000$'",
+        ),
+        (
+            "vyos",
+            "show bgp ipv4 community {target}",
+            "65000:100",
+            "show bgp ipv4 community 65000:100",
+        ),
+        (
+            "vyos",
+            "ping {target} count 5 interface {source4}",
+            "192.0.2.1",
+            "ping 192.0.2.1 count 5 interface 192.0.2.1",
+        ),
+        (
+            "linux",
+            "ping -c 1 {target}",
+            "192.0.2.1",
+            "ping -c 1 192.0.2.1",
+        ),
+        (
+            "linux_ssh",
+            'vtysh -c "show bgp ipv4 unicast regexp {target}"',
+            "65000$HOME",
+            "vtysh -c 'show bgp ipv4 unicast regexp 65000$HOME'",
         ),
         (
             "arista_eos",
@@ -278,7 +307,7 @@ def test_valid_targets_render_for_shell_and_cli_platforms(
     """
     rendered = _format(state, platform, command, target)
     assert rendered == expected
-    if platform in {"frr", "bird", "openbgpd", "tnsr"}:
+    if platform in SHELL_PLATFORMS:
         assert shlex.split(rendered) == shlex.split(
             quote_shell_command(command, target=target, **_ATTRS)
         )
@@ -341,12 +370,12 @@ def test_query_gate_rejects_payloads_before_construct(state):
             )
 
 
-def test_permissive_directive_still_rejects_zoned_ipv6_at_format(state):
-    """A rule without validation cannot carry a zoned address into the command."""
+def test_permissive_directive_rejects_zoned_ipv6_at_format(state):
+    """A RuleWithoutValidation directive cannot carry a zoned address into the command."""
     query = Query(
         queryLocation="test1",
         queryTarget="2001:db8::1%x foo",
-        queryType="juniper_bgp_route",
+        queryType="permissive_show",
     )
     constructor = Construct(device=state.devices["test1"], query=query)
     constructor.device = SimpleNamespace(platform="arista_eos", name="eos", attrs=_ATTRS)
@@ -396,16 +425,64 @@ def test_zone_id_is_rejected_even_when_character_denylist_is_bypassed(state, mon
         )
 
 
-def test_linux_escape_remains_when_shell_quoting_is_not_used(state, monkeypatch):
-    """The `$(…)` backslash escape still applies to a double-quoted Linux command."""
-    monkeypatch.setattr("hyperglass.execution.drivers._construct.SHELL_PLATFORMS", ())
-    rendered = _format(
-        state,
-        "frr",
-        'vtysh -c "show bgp ipv4 unicast regexp {target}"',
-        "^65000$",
+@pytest.mark.parametrize(
+    ("platform", "command"),
+    [
+        ("frr", 'vtysh -c "show bgp ipv4 unicast regexp {target}"'),
+        ("openbgpd", "bgpctl show rib inet as {target}"),
+        ("vyos", 'show bgp ipv4 regexp "{target}"'),
+    ],
+)
+def test_denylist_safe_quote_glob_payload_stays_one_shell_word(state, platform, command):
+    """A target with `'`, `$HOME`, and `*` that passes the denylist stays one shell word."""
+    payload = "65000' x '$HOME *"
+    rendered = _format(state, platform, command, payload)
+    argv = shlex.split(rendered)
+    containing = [word for word in argv if payload in word]
+    assert len(containing) == 1
+    assert containing[0] == payload or containing[0].endswith(payload)
+    for fragment in ("$HOME", "*", "x"):
+        assert fragment not in argv
+
+
+@pytest.mark.parametrize(
+    "command",
+    [
+        "show {target} | json",
+        "show {target} && id",
+        "show {target}; id",
+        "cat < {target}",
+        "tee > {target}",
+        "echo $HOME {target}",
+    ],
+)
+def test_shell_template_operators_are_rejected(state, command):
+    """Word-quoting must not turn template operators into literal arguments."""
+    with pytest.raises(ConfigError):
+        _format(state, "vyos", command, "65000")
+
+
+def test_linux_ssh_device_type_is_word_quoted(state):
+    """A device whose Netmiko type is linux_ssh is quoted even if the platform name is not."""
+    query = Query(
+        queryLocation="test1",
+        queryTarget="192.0.2.0/24",
+        queryType="juniper_bgp_route",
     )
-    assert rendered == 'vtysh -c "show bgp ipv4 unicast regexp ^65000\\$"'
+    constructor = Construct(device=state.devices["test1"], query=query)
+    constructor.device = SimpleNamespace(
+        platform="custom-nos",
+        name="linux",
+        attrs=_ATTRS,
+        get_device_type=lambda: "linux_ssh",
+    )
+    constructor.target = "^65000$"
+    rendered = constructor.format('vtysh -c "show bgp ipv4 unicast regexp {target}"')
+    assert shlex.split(rendered) == [
+        "vtysh",
+        "-c",
+        "show bgp ipv4 unicast regexp ^65000$",
+    ]
 
 
 def test_broken_shell_template_is_rejected(state):

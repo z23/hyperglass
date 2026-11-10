@@ -7,7 +7,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 ## [Unreleased]
 
 ### Fixed
-- Shell-quote query targets on FRR, BIRD, OpenBGPD, and TNSR, and reject IPv6 zone identifiers (including zone text with spaces) so a target cannot add extra shell or CLI words. See upstream [#383](https://github.com/thatmattlove/hyperglass/issues/383).
+- Word-quote query targets on FRR, BIRD, OpenBGPD, VyOS, `linux`, and `linux_ssh`, reject shell operators in those templates, and reject IPv6 zone identifiers (including zone text with spaces). See upstream [#383](https://github.com/thatmattlove/hyperglass/issues/383).
 - [#280](https://github.com/thatmattlove/hyperglass/issues/280): Fix: `condition: None` caused error in directive @Jimmy01240397
 - [#306](https://github.com/thatmattlove/hyperglass/issues/306): Fix: allow integer values in ext_community_list_raw field for Arista BGP - @cooperwinser
 - [#311](https://github.com/thatmattlove/hyperglass/issues/311): Fix: device and directive errors.

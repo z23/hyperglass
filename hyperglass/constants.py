@@ -91,10 +91,20 @@ LINUX_PLATFORMS = (
     "openbgpd",
 )
 
-# Platforms whose command string is parsed by a POSIX shell (Netmiko
-# ``linux_ssh`` for FRR/BIRD/OpenBGPD, and TNSR's ``dataplane shell``).
-# Targets on these platforms are interpolated as one ``shlex.quote``d word.
-SHELL_PLATFORMS = LINUX_PLATFORMS + ("tnsr",)
+# Platforms whose command string is parsed by a POSIX shell. FRR, BIRD, and
+# OpenBGPD use Netmiko ``linux_ssh``. ``vyos`` is vbash. ``linux`` and
+# ``linux_ssh`` are themselves accepted device platforms via Netmiko's
+# CLASS_MAPPER. Templates for these platforms are word-quoted (see
+# ``quote_shell_command``). TNSR is omitted: its CLI receives
+# ``dataplane shell sudo vtysh -c "..."``, and single-quoting that line was
+# not verified against the TNSR CLI.
+SHELL_PLATFORMS = LINUX_PLATFORMS + ("vyos", "linux", "linux_ssh")
+
+# Characters ``shlex`` treats as shell punctuation when ``punctuation_chars``
+# is enabled. A template token made only of these, or any token containing
+# ``$``, is a shell operator that word-quoting would turn into a literal
+# argument.
+_SHELL_OPERATOR_CHARS = frozenset("();<>|&")
 
 # Characters that must never appear in a query target. Used at two points in
 # the request pipeline (once at the type/validation boundary in
@@ -129,24 +139,12 @@ def target_contains_forbidden_content(value: str) -> bool:
 
 
 def shell_escape_linux_target(value: str) -> str:
-    r"""Escape a target for interpolation inside double quotes on a Linux shell.
+    r"""Escape ``$``, quotes, backticks, and backslashes for double quotes.
 
-    Netmiko uses ``device_type=linux_ssh`` for FRR/BIRD/OpenBGPD and sends the
-    full command string to a bash login shell. Built-in directives wrap
-    ``{target}`` in double quotes, where unescaped ``$`` and backticks still
-    expand. Escaping backslash, ``$``, backtick, and ``"`` makes bash pass the
-    literal target through to the tool (so a legitimate AS-path anchor like
-    ``^65000$`` reaches vtysh as ``^65000$``, while ``$(reboot)`` becomes inert
-    text).
-
-    ``SHELL_PLATFORMS`` do not use this escape on the rendered command: those
-    commands are rebuilt with ``quote_shell_command``, and a backslash inside
-    the resulting single quotes would keep a literal ``\\`` in front of an
-    AS-path ``$``. This helper remains the double-quoted interpolation defense
-    for any other Linux command line.
-
-    Call only for ``LINUX_PLATFORMS``. Pure CLI NOS (Arista, Cisco, Juniper, …)
-    do not evaluate shell metacharacters and must receive the target verbatim.
+    ``Construct.format`` does not call this. Shell platforms are word-quoted,
+    and the forbidden-content denylist rejects ``$(`` / ``${`` before
+    interpolation. Backslash-escaping inside those single quotes would leave a
+    literal ``\`` in front of an AS-path ``$``.
     """
     return (
         value.replace("\\", "\\\\")
@@ -175,10 +173,16 @@ def canonical_ip_target(value: str) -> t.Optional[str]:
     ignored so only the address bytes are returned; callers still reject zoned
     input rather than querying the stripped address.
     """
-    if not isinstance(value, str) or value == "":
+    if not isinstance(value, str):
+        return None
+    # Leading/trailing Unicode whitespace (for example NBSP) is stripped only
+    # so a padded address still parses. Callers reject the raw value when it
+    # contains whitespace, so the padding is never sent to the device.
+    text = value.strip()
+    if text == "":
         return None
 
-    address_text = value.split("%", 1)[0]
+    address_text = text.split("%", 1)[0]
     head, slash, prefixlen = address_text.partition("/")
     try:
         if slash:
@@ -198,15 +202,37 @@ def canonical_ip_target(value: str) -> t.Optional[str]:
         return None
 
 
-def quote_shell_command(command: str, /, **values: t.Any) -> str:
-    """Fill a trusted shell template and quote every resulting word.
+def _shell_template_operator(command: str) -> t.Optional[str]:
+    """Return the first shell operator token in a command template, if any.
 
-    ``shlex.split`` honors quotes in the operator template, so
-    ``vtysh -c "show bgp ... {target}"`` stays a single argument. Each word is
-    formatted, then ``shlex.quote``d, which keeps the target one literal shell
-    word when it contains spaces, quotes, ``$()``, or glob characters.
-
-    Raises ``ValueError`` when the template's quotes do not parse.
+    Tokenises with ``punctuation_chars`` so ``|``, ``&&``, ``;``, and
+    redirects are their own tokens. ``$VAR`` is either a ``$`` token or a
+    word containing ``$``. Quoted text stays one word, so a pipe inside a
+    ``vtysh -c "..."`` argument is not an operator.
     """
+    lexer = shlex.shlex(command, posix=True, punctuation_chars=True)
+    lexer.commenters = ""
+    for token in lexer:
+        if not token:
+            continue
+        if "$" in token or all(char in _SHELL_OPERATOR_CHARS for char in token):
+            return token
+    return None
+
+
+def quote_shell_command(command: str, /, **values: t.Any) -> str:
+    """Word-quote a shell-platform command template.
+
+    Shell-platform templates are word-quoted: ``shlex.split`` reads the
+    trusted template, each word is formatted, then ``shlex.quote`` keeps the
+    target a single literal argument. Operators in the template (``|``,
+    ``&&``, ``;``, redirects, ``$VAR``) would become literal arguments, so
+    they raise ``ValueError`` instead of being quoted.
+
+    Also raises ``ValueError`` when the template's quotes do not parse.
+    """
+    operator = _shell_template_operator(command)
+    if operator is not None:
+        raise ValueError(f"shell template contains operator {operator!r}")
     words = [word.format(**values) for word in shlex.split(command)]
     return shlex.join(words)

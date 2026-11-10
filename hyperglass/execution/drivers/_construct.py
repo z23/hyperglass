@@ -16,12 +16,10 @@ from hyperglass.log import log
 from hyperglass.util import get_fmt_keys
 from hyperglass.constants import (
     TRANSPORT_REST,
-    LINUX_PLATFORMS,
     SHELL_PLATFORMS,
     TARGET_FORMAT_SPACE,
     canonical_ip_target,
     quote_shell_command,
-    shell_escape_linux_target,
     ip_target_has_zone_or_whitespace,
     target_contains_forbidden_content,
 )
@@ -44,8 +42,8 @@ FormatterCallback = t.Callable[[str], t.Union[t.List[str], str]]
 # `models.api.query`; running it again here means a regression in either the
 # QueryTarget constraint or a custom directive's regex still cannot reach
 # `send_command`. IP targets are canonicalised (and zoned addresses rejected)
-# so a scope id cannot add extra CLI words. Shell platforms then quote every
-# command word; other Linux command lines still get the `$(…)` backslash escape.
+# so a scope id cannot add extra CLI words. Shell platforms then word-quote
+# the command. The forbidden-content denylist rejects `$(` / `${` before that.
 
 
 class Construct:
@@ -158,30 +156,40 @@ class Construct:
         target_for_cmd = self._resolved_target()
         fmt = {"target": target_for_cmd, "mask": mask, **attrs}
 
-        # Shell-backed NOS: quote each template word so the target stays one
-        # literal argument. Single quotes already neutralize `$()`, `${}`,
-        # quotes, spaces, and globs, including on unquoted `bgpctl` / `ping`
-        # lines. Do not also backslash-escape `$` here; inside those single
-        # quotes the backslash would be preserved and `^65000$` would reach
-        # vtysh as `^65000\$`.
-        if self.device.platform in SHELL_PLATFORMS:
+        # Shell-backed NOS, including VyOS vbash and device platforms ``linux``
+        # / ``linux_ssh``: word-quote the template so the target stays one
+        # literal argument. Single quotes neutralize `$()`, `${}`, quotes,
+        # spaces, and globs. A template operator is a config error; word-quoting
+        # would otherwise turn it into a literal argument.
+        if self._command_is_shell_backed():
             try:
                 return quote_shell_command(command, **fmt)
             except ValueError as err:
                 raise ConfigError(
-                    "Command '{c}' on device '{d}' has invalid shell quoting",
+                    "Command '{c}' on device '{d}' is not a word-quoted shell template ({reason})",
                     level="danger",
                     c=self.directive.name,
                     d=self.device.name,
+                    reason=err,
                 ) from err
 
-        # Retained `$(…)` escape for a Linux command that is still interpolated
-        # with str.format into double quotes.
-        if self.device.platform in LINUX_PLATFORMS and isinstance(target_for_cmd, str):
-            target_for_cmd = shell_escape_linux_target(target_for_cmd)
-            fmt = {"target": target_for_cmd, "mask": mask, **attrs}
-
         return command.format(**fmt)
+
+    def _command_is_shell_backed(self) -> bool:
+        """Return True when this device's command string is parsed by a shell.
+
+        Platform names in ``SHELL_PLATFORMS`` cover the builtin NOS set and the
+        generic ``linux`` / ``linux_ssh`` / ``vyos`` device types. A device
+        object that reports one of those Netmiko device types is included even
+        when the platform string is not itself in the set.
+        """
+        platform = getattr(self.device, "platform", None)
+        if platform in SHELL_PLATFORMS:
+            return True
+        get_device_type = getattr(self.device, "get_device_type", None)
+        if not callable(get_device_type):
+            return False
+        return get_device_type() in {"linux", "linux_ssh", "vyos"}
 
     def queries(self):
         """Return queries for each enabled AFI."""

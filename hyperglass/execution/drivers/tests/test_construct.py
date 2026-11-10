@@ -5,6 +5,8 @@ from types import SimpleNamespace
 
 # Third Party
 import pytest
+from netmiko.ssh_dispatcher import CLASS_MAPPER
+from netmiko.linux.linux_ssh import LinuxSSH
 
 # Project
 from hyperglass.state import use_state
@@ -460,6 +462,27 @@ def test_shell_template_operators_are_rejected(state, command):
     """Word-quoting must not turn template operators into literal arguments."""
     with pytest.raises(ConfigError):
         _format(state, "vyos", command, "65000")
+
+
+@pytest.mark.parametrize("device_type", ["vyos_ssh", "cumulus_linux"])
+def test_netmiko_shell_subclasses_are_word_quoted(state, monkeypatch, device_type):
+    """``vyos_ssh`` and ``cumulus_linux`` quote because their Netmiko class is a shell.
+
+    Netmiko 4.1.2 has ``vyos_ssh`` (``VyOSSSH``) and does not register
+    ``cumulus_linux``. The missing name is filled with a ``LinuxSSH`` subclass,
+    which is how a newer Netmiko exposes it.
+    """
+    if device_type not in CLASS_MAPPER:
+        monkeypatch.setitem(CLASS_MAPPER, device_type, type("CumulusLinuxSSH", (LinuxSSH,), {}))
+    rendered = _format(state, device_type, 'show bgp ipv4 regexp "{target}"', "^65000$")
+    assert shlex.split(rendered) == ["show", "bgp", "ipv4", "regexp", "^65000$"]
+    assert rendered == "show bgp ipv4 regexp '^65000$'"
+
+
+def test_unknown_device_type_is_not_quoted_and_does_not_raise(state):
+    """A device type Netmiko does not know stays on plain formatting."""
+    rendered = _format(state, "not-a-netmiko-type", "show bgp regexp {target}", "^65000$")
+    assert rendered == "show bgp regexp ^65000$"
 
 
 def test_linux_ssh_device_type_is_word_quoted(state):

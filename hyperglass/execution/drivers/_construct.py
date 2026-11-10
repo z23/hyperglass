@@ -11,6 +11,11 @@ import json as _json
 import typing as t
 import ipaddress
 
+# Third Party
+from netmiko.vyos.vyos_ssh import VyOSSSH
+from netmiko.ssh_dispatcher import CLASS_MAPPER
+from netmiko.linux.linux_ssh import LinuxSSH
+
 # Project
 from hyperglass.log import log
 from hyperglass.util import get_fmt_keys
@@ -156,8 +161,7 @@ class Construct:
         target_for_cmd = self._resolved_target()
         fmt = {"target": target_for_cmd, "mask": mask, **attrs}
 
-        # Shell-backed NOS, including VyOS vbash and device platforms ``linux``
-        # / ``linux_ssh``: word-quote the template so the target stays one
+        # Shell-backed NOS: word-quote the template so the target stays one
         # literal argument. Single quotes neutralize `$()`, `${}`, quotes,
         # spaces, and globs. A template operator is a config error; word-quoting
         # would otherwise turn it into a literal argument.
@@ -175,21 +179,39 @@ class Construct:
 
         return command.format(**fmt)
 
+    def _netmiko_device_type(self) -> t.Optional[str]:
+        """Return the Netmiko device type, or the platform name when unset."""
+        getter = getattr(self.device, "get_device_type", None)
+        if callable(getter):
+            value = getter()
+            if isinstance(value, str) and value:
+                return value
+        platform = getattr(self.device, "platform", None)
+        if isinstance(platform, str) and platform:
+            return platform
+        return None
+
     def _command_is_shell_backed(self) -> bool:
         """Return True when this device's command string is parsed by a shell.
 
-        Platform names in ``SHELL_PLATFORMS`` cover the builtin NOS set and the
-        generic ``linux`` / ``linux_ssh`` / ``vyos`` device types. A device
-        object that reports one of those Netmiko device types is included even
-        when the platform string is not itself in the set.
+        Netmiko classes decide it: a ``LinuxSSH`` or ``VyOSSSH`` subclass
+        (``linux_ssh``, ``vyos_ssh``, ``cumulus_linux``, EdgeRouter, and the
+        other aliases registered in ``CLASS_MAPPER``). An unknown device type
+        does not raise. Hyperglass platforms that are not Netmiko keys
+        (``frr``, ``bird``, ``openbgpd``) still match ``SHELL_PLATFORMS``,
+        because their live device type is ``linux_ssh``.
         """
-        platform = getattr(self.device, "platform", None)
-        if platform in SHELL_PLATFORMS:
-            return True
-        get_device_type = getattr(self.device, "get_device_type", None)
-        if not callable(get_device_type):
+        device_type = self._netmiko_device_type()
+        if device_type is None:
             return False
-        return get_device_type() in {"linux", "linux_ssh", "vyos"}
+        try:
+            driver = CLASS_MAPPER[device_type]
+        except KeyError:
+            return device_type in SHELL_PLATFORMS
+        try:
+            return issubclass(driver, (LinuxSSH, VyOSSSH))
+        except TypeError:
+            return False
 
     def queries(self):
         """Return queries for each enabled AFI."""

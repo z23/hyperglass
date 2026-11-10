@@ -91,13 +91,13 @@ LINUX_PLATFORMS = (
     "openbgpd",
 )
 
-# Platforms whose command string is parsed by a POSIX shell. FRR, BIRD, and
-# OpenBGPD use Netmiko ``linux_ssh``. ``vyos`` is vbash. ``linux`` and
-# ``linux_ssh`` are themselves accepted device platforms via Netmiko's
-# CLASS_MAPPER. Templates for these platforms are word-quoted (see
-# ``quote_shell_command``). TNSR is omitted: its CLI receives
-# ``dataplane shell sudo vtysh -c "..."``, and single-quoting that line was
-# not verified against the TNSR CLI.
+# Hyperglass platform names whose commands are parsed by a shell but which are
+# not themselves Netmiko ``CLASS_MAPPER`` keys (``frr``, ``bird``,
+# ``openbgpd``). ``vyos``, ``linux``, and ``linux_ssh`` are also listed so a
+# missing Netmiko entry still quotes them. Other shell-backed Netmiko types
+# are detected by class (``LinuxSSH`` / ``VyOSSSH``) in ``Construct``.
+# TNSR is omitted: single-quoting ``dataplane shell sudo vtysh -c`` was not
+# verified against the TNSR CLI.
 SHELL_PLATFORMS = LINUX_PLATFORMS + ("vyos", "linux", "linux_ssh")
 
 # Characters ``shlex`` treats as shell punctuation when ``punctuation_chars``
@@ -136,22 +136,6 @@ def target_contains_forbidden_content(value: str) -> bool:
     if any(c in FORBIDDEN_TARGET_CHARS for c in value):
         return True
     return any(seq in value for seq in FORBIDDEN_TARGET_SUBSTRINGS)
-
-
-def shell_escape_linux_target(value: str) -> str:
-    r"""Escape ``$``, quotes, backticks, and backslashes for double quotes.
-
-    ``Construct.format`` does not call this. Shell platforms are word-quoted,
-    and the forbidden-content denylist rejects ``$(`` / ``${`` before
-    interpolation. Backslash-escaping inside those single quotes would leave a
-    literal ``\`` in front of an AS-path ``$``.
-    """
-    return (
-        value.replace("\\", "\\\\")
-        .replace("`", "\\`")
-        .replace("$", "\\$")
-        .replace('"', '\\"')
-    )
 
 
 def ip_target_has_zone_or_whitespace(value: str) -> bool:

@@ -276,21 +276,6 @@ def test_directive_ip_rules_reject_zone_and_still_match_family():
     assert passed == ["ipv4"]
 
 
-def test_shell_escape_linux_target_neutralizes_substitution():
-    r"""Escaped targets keep AS-path anchors but neutralize `$(…)` for bash.
-
-    After bash double-quote parsing, `\$` becomes a literal `$`, so vtysh still
-    sees `^65000$` while `$(reboot)` cannot execute.
-    """
-    # Project
-    from hyperglass.constants import shell_escape_linux_target
-
-    assert shell_escape_linux_target("^65000$") == "^65000\\$"
-    assert shell_escape_linux_target("$(reboot)") == "\\$(reboot)"
-    assert shell_escape_linux_target('a"b') == 'a\\"b'
-    assert shell_escape_linux_target("a\\b") == "a\\\\b"
-
-
 def test_canonical_ip_target_drops_zone_and_keeps_host_form():
     """Normalised addresses omit zone text and do not invent a /32 or /128."""
     assert canonical_ip_target("192.0.2.1") == "192.0.2.1"

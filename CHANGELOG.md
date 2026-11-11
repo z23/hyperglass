@@ -18,6 +18,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - `proxy.known_hosts_file`: optional path to an OpenSSH-format `known_hosts` file. When set, the SSH proxy's host key is strictly verified; when unset, the host key is not verified (matching previous behavior) and a warning is logged.
 
+### Dependencies
+
+- Removed three declared dependencies that nothing imports (`PyJWT`, `aiofiles`, `distro`) and the stale `poetry.lock`; the project is locked with `requirements.lock` / `requirements-dev.lock`.
+- Upgraded the pinned packages that carried security advisories: httpx 0.24.0 to 0.28.1 (with httpcore 1.0.9 and h11 0.16.0), paramiko 3.4.0 to 3.5.1, cryptography 42.0.3 to 50.0.2, Pillow 10.2.0 to 10.4.0, jinja2 3.1.6, lxml 6.1.3, PyNaCl 1.6.2, brotli 1.2.1, certifi, idna, pygments, python-dotenv and setuptools. All other pins are unchanged.
+- paramiko stays on 3.x on purpose: later major versions stop accepting SHA-1 `ssh-rsa`, which older network devices still require.
+
 ### Fixed
 
 - SSH proxy tunnel setup no longer performs blocking network I/O on the event loop; proxy connections are established in the same worker thread as the device connection.

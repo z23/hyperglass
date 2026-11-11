@@ -214,8 +214,8 @@ def migrate_images(app_path: Path, params: "UIParameters"):
 def write_favicon_formats(formats: t.Tuple[t.Dict[str, t.Any]]) -> None:
     """Create a TypeScript file in the `ui` directory containing favicon formats.
 
-    This file should stay the same, unless the favicons library updates
-    supported formats.
+    This file should stay the same, unless the formats in
+    `hyperglass.frontend.favicons` change.
     """
     # Standard Library
     from collections import OrderedDict
@@ -264,11 +264,11 @@ async def build_frontend(  # noqa: C901
     # Standard Library
     import hashlib
 
-    # Third Party
-    from favicons import Favicons  # type:ignore
-
     # Project
     from hyperglass.constants import __version__
+
+    # Local
+    from .favicons import favicon_formats, generate_favicons
 
     # Create temporary file. json file extension is added for easy
     # webpack JSON parsing.
@@ -310,14 +310,10 @@ async def build_frontend(  # noqa: C901
     if not favicon_dir.exists():
         favicon_dir.mkdir()
 
-    async with Favicons(
-        source=params.web.logo.favicon,
-        output_directory=favicon_dir,
-        base_url="/images/favicons/",
-    ) as favicons:
-        await favicons.generate()
-        log.bind(count=favicons.completed).debug("Generated favicons")
-        write_favicon_formats(favicons.formats())
+    # Image decoding and resizing block; keep them off the event loop.
+    generated = await asyncio.to_thread(generate_favicons, params.web.logo.favicon, favicon_dir)
+    log.bind(count=generated).debug("Generated favicons")
+    write_favicon_formats(favicon_formats())
 
     build_data = {
         "params": params.export_dict(),

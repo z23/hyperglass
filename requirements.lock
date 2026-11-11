@@ -42,8 +42,6 @@ editorconfig==0.12.4
     # via jsbeautifier
 faker==24.4.0
     # via polyfactory
-favicons==0.2.2
-    # via hyperglass
 freetype-py==2.4.0
     # via rlpycairo
 future==0.18.3
@@ -93,9 +91,8 @@ paramiko==3.5.1
     # via hyperglass
     # via netmiko
     # via scp
-pillow==10.4.0
+pillow==13.0.0
     # via hyperglass
-    # via favicons
     # via reportlab
 polyfactory==3.3.0
     # via litestar
@@ -136,17 +133,16 @@ pyyaml==6.0.1
 redis==4.5.4
     # via hyperglass
 reportlab==4.1.0
-    # via favicons
+    # via hyperglass
     # via svglib
 rich==13.7.0
     # via hyperglass
-    # via favicons
     # via litestar
     # via rich-click
 rich-click==1.9.9
     # via litestar
 rlpycairo==0.3.0
-    # via favicons
+    # via hyperglass
 scp==0.14.5
     # via netmiko
 setuptools==84.2.1
@@ -158,7 +154,7 @@ six==1.16.0
 sniffio==1.3.1
     # via litestar
 svglib==1.5.1
-    # via favicons
+    # via hyperglass
 tenacity==8.2.3
     # via netmiko
 textfsm==1.1.2
@@ -171,7 +167,6 @@ toml==0.10.2
     # via hyperglass
 typer==0.9.0
     # via hyperglass
-    # via favicons
 typing-extensions==4.16.0
     # via anyio
     # via litestar

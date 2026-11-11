@@ -22,6 +22,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 - Removed three declared dependencies that nothing imports (`PyJWT`, `aiofiles`, `distro`) and the stale `poetry.lock`; the project is locked with `requirements.lock` / `requirements-dev.lock`.
 - Upgraded the pinned packages that carried security advisories: httpx 0.24.0 to 0.28.1 (with httpcore 1.0.9 and h11 0.16.0), paramiko 3.4.0 to 3.5.1, cryptography 42.0.3 to 50.0.2, Pillow 10.2.0 to 10.4.0, jinja2 3.1.6, lxml 6.1.3, PyNaCl 1.6.2, brotli 1.2.1, certifi, idna, pygments, python-dotenv and setuptools. All other pins are unchanged.
+- Replaced the `favicons` package with a small in-repo generator (`hyperglass/frontend/favicons.py`) that produces the same 21 files. `favicons` 0.2.2 required `Pillow < 11`; Pillow is now 13.0.0, which clears its remaining advisories. SVG sources are still rasterised with svglib and reportlab.
 - paramiko stays on 3.x on purpose: later major versions stop accepting SHA-1 `ssh-rsa`, which older network devices still require.
 
 ### Fixed

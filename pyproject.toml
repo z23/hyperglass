@@ -6,11 +6,9 @@ authors = [
     { name = "thatmattlove", email = "matt@hyperglass.dev" }
 ]
 dependencies = [
-    # favicons 0.2.2 requires Pillow < 11.
-    "Pillow>=10.4.0,<11",
+    "Pillow>=13.0.0",
     "PyYAML>=6.0",
     "anyio>=4.3.0",
-    "favicons==0.2.2",
     "httpx>=0.28.1",
     "loguru>=0.7.2",
     "netmiko==4.1.2",
@@ -21,7 +19,11 @@ dependencies = [
     "py-cpuinfo==9.0.0",
     "pydantic>=2.6.3",
     "redis==4.5.4",
+    # reportlab, rlPyCairo and svglib rasterise an SVG favicon source.
+    "reportlab>=4.1.0",
     "rich>=13.7.0",
+    "rlPyCairo>=0.3.0",
+    "svglib>=1.5.1",
     "typer>=0.9.0",
     "uvicorn==0.21.1",
     "uvloop>=0.17.0",

@@ -29,9 +29,10 @@ by default. Point Caddy (or another proxy) at that local port.
 Set `FORWARDED_ALLOW_IPS` in the **hyperglass process environment**, not the proxy's,
 to the exact proxy peer address seen by Uvicorn (its default is `127.0.0.1`).
 The native examples below use `::1`; Docker requires a container-visible peer.
-Use unbracketed IP addresses, not hostnames or CIDR ranges, with the pinned Uvicorn
-version. Multiple exact peers can be comma-separated. Do not use `*` or trust
-public client addresses. An untrusted proxy
+Use unbracketed IP addresses, not hostnames. Multiple peers can be comma-separated.
+A CIDR network (for example `172.18.0.0/16`) is also accepted and trusts every
+address in it, so prefer the exact proxy address and keep any network as narrow as
+the proxy's own subnet. Do not use `*` or trust public client addresses. An untrusted proxy
 will cause its clients to share one rate-limit budget; an overly broad trust list
 can let clients spoof their identity. Check this setting against your actual
 network path before rollout, including any CDN or load balancer in front.

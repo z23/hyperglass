@@ -1,7 +1,6 @@
 """Utility functions for gathering system information."""
 
 # Standard Library
-import os
 import sys
 import typing as t
 import platform
@@ -88,13 +87,16 @@ def check_python() -> str:
 def get_system_info() -> SystemData:
     """Get system info."""
 
+    # Project
+    from hyperglass.settings import Settings
+
     cpu_info, cpu_logical, cpu_physical, cpu_speed = _cpu()
     mem_total, mem_usage = _memory()
     disk_total, disk_usage = _disk()
 
     return {
         "hyperglass Version": (__version__, "text"),
-        "hyperglass Path": (os.environ["hyperglass_directory"], "code"),
+        "hyperglass Path": (str(Settings.app_path), "code"),
         "Python Version": (platform.python_version(), "code"),
         "Node Version": (".".join(str(v) for v in get_node_version()), "code"),
         "Platform Info": (platform.platform(), "code"),

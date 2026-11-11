@@ -29,7 +29,7 @@ def run():
     return typer.run(cli())
 
 
-@cli.callback(name="version")
+@cli.callback()
 def _version(
     version: t.Optional[bool] = typer.Option(
         None, "--version", help="hyperglass version", callback=_version

@@ -15,19 +15,20 @@ dependencies = [
     # Stay on 3.x: later majors stop accepting SHA-1 ssh-rsa, which older
     # network devices still require.
     "paramiko>=3.5.1,<4",
-    "psutil==5.9.4",
+    # taskipy (dev task runner) requires psutil < 7.
+    "psutil>=6.1.1,<7",
     "py-cpuinfo==9.0.0",
-    "pydantic>=2.6.3",
-    "redis==4.5.4",
+    "pydantic>=2.14.3",
+    "redis>=8.1.0",
     # reportlab, rlPyCairo and svglib rasterise an SVG favicon source.
     "reportlab>=4.1.0",
     "rich>=13.7.0",
     "rlPyCairo>=0.3.0",
     "svglib>=1.5.1",
     "typer>=0.9.0",
-    "uvicorn==0.21.1",
+    "uvicorn>=0.54.0",
     "uvloop>=0.17.0",
-    "xmltodict==0.13.0",
+    "xmltodict>=1.0.4",
     "toml>=0.10.2",
     "pydantic-settings>=2.2.1",
     "pydantic-extra-types>=2.6.0",

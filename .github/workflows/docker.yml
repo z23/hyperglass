@@ -23,6 +23,13 @@ jobs:
             - name: Git Checkout
               uses: actions/checkout@v4
 
+            # Before any container starts: Docker creates a missing bind-mount
+            # source as root, which the runner user then cannot write to.
+            - name: Prepare configuration
+              run: |
+                  mkdir -p "$HYPERGLASS_APP_PATH"
+                  cp .tests/devices.yaml .tests/directives.yaml "$HYPERGLASS_APP_PATH/"
+
             - name: Build image
               run: docker compose build
 
@@ -30,11 +37,6 @@ jobs:
               run: |
                   docker compose run --rm --no-deps --entrypoint sh hyperglass -c \
                       'cat /etc/alpine-release; python3 --version; node --version; pnpm --version; pip3 check'
-
-            - name: Prepare configuration
-              run: |
-                  mkdir -p "$HYPERGLASS_APP_PATH"
-                  cp .tests/devices.yaml .tests/directives.yaml "$HYPERGLASS_APP_PATH/"
 
             - name: Start hyperglass
               run: docker compose up -d

@@ -1,5 +1,11 @@
+# Dependencies allowed to run their install scripts.
+# pnpm 9 and 10 read `onlyBuiltDependencies`; pnpm 11 and later read
+# `allowBuilds` and fail the install when a script is neither allowed nor denied.
 onlyBuiltDependencies:
   - '@biomejs/biome'
   - esbuild
+allowBuilds:
+  '@biomejs/biome': true
+  esbuild: true
 packages:
   - .

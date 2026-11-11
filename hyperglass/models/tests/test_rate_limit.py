@@ -14,6 +14,7 @@ These pin the guarantees of the rate-limit config:
 """
 
 # Standard Library
+import os
 import re
 import time
 from types import SimpleNamespace
@@ -61,7 +62,12 @@ def redis_url(tmp_path_factory):
     """Run an isolated Redis on a Unix socket; never use or flush ambient Redis."""
     executable = shutil.which("redis-server")
     if executable is None:
-        pytest.skip("redis-server executable is required for rate-limit integration tests")
+        reason = "redis-server executable is required for rate-limit integration tests"
+        if os.environ.get("CI"):
+            # On CI a missing binary must fail, not skip: these are the only
+            # tests that exercise admission against a real Redis.
+            pytest.fail(reason)
+        pytest.skip(reason)
     directory = tmp_path_factory.mktemp("rate-limit")
     socket = directory / "redis.sock"
     process = subprocess.Popen(  # noqa: S603

@@ -11,7 +11,7 @@ dependencies = [
     "anyio>=4.3.0",
     "httpx>=0.28.1",
     "loguru>=0.7.2",
-    "netmiko==4.1.2",
+    "netmiko>=4.8.0",
     # Stay on 3.x: later majors stop accepting SHA-1 ssh-rsa, which older
     # network devices still require.
     "paramiko>=3.5.1,<4",

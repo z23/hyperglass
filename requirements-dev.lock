@@ -22,7 +22,7 @@ anyio==4.16.0
 async-timeout==5.0.1
     # via redis
 bandit==1.7.7
-bcrypt==4.1.2
+bcrypt==5.0.0
     # via paramiko
 black==24.2.0
 brotli==1.2.1
@@ -60,8 +60,6 @@ flake8==7.0.0
     # via pep8-naming
 freetype-py==2.4.0
     # via rlpycairo
-future==0.18.3
-    # via textfsm
 h11==0.16.0
     # via httpcore
     # via uvicorn
@@ -108,11 +106,11 @@ multipart==2.0.1
     # via litestar
 mypy-extensions==1.0.0
     # via black
-netmiko==4.1.2
+netmiko==4.8.0
     # via hyperglass
 nodeenv==1.8.0
     # via pre-commit
-ntc-templates==4.3.0
+ntc-templates==9.3.0
     # via netmiko
 packaging==23.2
     # via black
@@ -191,6 +189,7 @@ rich==15.0.0
     # via hyperglass
     # via bandit
     # via litestar
+    # via netmiko
     # via rich-click
     # via typer
 rich-click==1.9.9
@@ -198,16 +197,13 @@ rich-click==1.9.9
 rlpycairo==0.3.0
     # via hyperglass
 ruff==0.2.2
-scp==0.14.5
+scp==0.16.2
     # via netmiko
 setuptools==84.2.1
-    # via netmiko
     # via nodeenv
     # via pytest-dependency
 shellingham==1.5.4
     # via typer
-six==1.16.0
-    # via textfsm
 sniffio==1.3.1
     # via litestar
 stackprinter==0.2.11
@@ -216,9 +212,7 @@ stevedore==5.1.0
 svglib==1.5.1
     # via hyperglass
 taskipy==1.14.1
-tenacity==8.2.3
-    # via netmiko
-textfsm==1.1.2
+textfsm==2.1.1
     # via netmiko
     # via ntc-templates
 tinycss2==1.2.1

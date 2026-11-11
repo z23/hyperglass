@@ -13,7 +13,9 @@ COPY . .
 FROM base as ui
 WORKDIR /opt/hyperglass/hyperglass/ui
 RUN apk add build-base pkgconfig cairo-dev nodejs npm
-RUN npm install -g pnpm
+# Pin the major version: an unpinned install picks up whatever pnpm is current,
+# and a new major has already broken the UI install at container start.
+RUN npm install -g pnpm@10
 RUN pnpm install -P
 
 FROM ui as hyperglass

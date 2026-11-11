@@ -42,6 +42,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - [#306](https://github.com/thatmattlove/hyperglass/issues/306): Fix: allow integer values in ext_community_list_raw field for Arista BGP - @cooperwinser
 - The query rate limiter budgets an IPv6 client by its `/64` instead of by its address, so a client can no longer avoid the limit by rotating source addresses within its own prefix. IPv4-mapped IPv6 addresses share the IPv4 address's budget.
 - [#311](https://github.com/thatmattlove/hyperglass/issues/311): Fix: device and directive errors.
+- The UI dependency install failed with pnpm 11 and later (`ERR_PNPM_IGNORED_BUILDS`), so a freshly built Docker image, which installed the latest pnpm, did not start. `pnpm-workspace.yaml` now carries the build-script allow-list in the form each pnpm version reads, and the Dockerfile pins pnpm to version 10.
 - [#315](https://github.com/thatmattlove/hyperglass/issues/315): Impossibile to use command "BGP Route" with Huawei NetEngine 8000 
 - [#315](https://github.com/thatmattlove/hyperglass/issues/187): Error in bgp_router query on Huawei
 - [#325](https://github.com/thatmattlove/hyperglass/pull/325): Fix code block padding in the documentation - @jagardaniel

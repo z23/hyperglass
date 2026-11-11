@@ -25,7 +25,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Replaced the `favicons` package with a small in-repo generator (`hyperglass/frontend/favicons.py`) that produces the same 21 files. `favicons` 0.2.2 required `Pillow < 11`; Pillow is now 13.0.0, which clears its remaining advisories. SVG sources are still rasterised with svglib and reportlab.
 - Refreshed the web stack: uvicorn 0.21.1 to 0.54.0, Litestar 2.25.0, pydantic 2.6.3 to 2.14.3, the Redis client 4.5.4 to 8.1.0, typer 0.9.0 to 0.29.0, rich 15.0.0, psutil 6.1.1, xmltodict 1.0.4 and their dependencies. With the newer uvicorn, `FORWARDED_ALLOW_IPS` also accepts CIDR networks; previously a network was silently ignored.
 - The lock files are now resolved for Python 3.11, the oldest supported version, so they install correctly on both 3.11 and 3.12.
-- paramiko stays on 3.x on purpose: later major versions stop accepting SHA-1 `ssh-rsa`, which older network devices still require.
+- netmiko 4.1.2 to 4.8.0, with textfsm 2.1.1, ntc-templates 9.3.0, scp 0.16.2 and bcrypt 5.0.0. `future`, `six`, `tenacity` and `setuptools` are no longer installed.
+- paramiko stays on 3.x on purpose: paramiko 5 removed the `ssh-rsa` host key algorithm and every SHA-1 key exchange from the client, with no way to re-enable them, and older network devices often offer nothing else. The new `hyperglass ssh-algorithms` command reports which configured devices depend on them.
 
 ### Fixed
 

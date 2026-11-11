@@ -186,6 +186,61 @@ def _devices(
     echo._console.print(Columns(panels))
 
 
+@cli.command(name="ssh-algorithms")
+def _ssh_algorithms(
+    timeout: float = typer.Option(10, help="Seconds to wait for each device"),
+    verbose: bool = typer.Option(False, help="List every algorithm each device offers"),
+) -> None:
+    """Show which SSH devices could not be reached without SHA-1 algorithms"""
+    # Third Party
+    from rich.table import Table
+
+    # Project
+    from hyperglass.state import use_state
+    from hyperglass.util.ssh_algorithms import probe
+
+    devices = use_state("devices")
+    table = Table("Device", "Address", "SSH Server", "Result")
+    legacy = 0
+    unchecked = 0
+
+    for device in devices:
+        if device.driver != "netmiko" or "_telnet" in device.platform:
+            continue
+        address = f"{device._target}:{device.port}"
+        if device.proxy is not None:
+            # The device is only reachable from the proxy, so what it offers
+            # cannot be read from here.
+            table.add_row(device.name, address, "", "not checked: behind an SSH proxy")
+            unchecked += 1
+            continue
+
+        result = probe(device._target, device.port, timeout=timeout)
+        style = None
+        if result.legacy_only:
+            legacy += 1
+            style = "bold red"
+        elif not result.reachable:
+            unchecked += 1
+            style = "yellow"
+        table.add_row(device.name, address, result.server_version, result.verdict, style=style)
+        if verbose and result.reachable:
+            table.add_row("", "", "key exchange", ", ".join(result.kex))
+            table.add_row("", "", "host key", ", ".join(result.host_key))
+
+    echo._console.print(table)
+    if legacy:
+        echo.warning(
+            "{} device(s) only offer SHA-1 SSH algorithms. Keep paramiko 3.x or upgrade them",
+            legacy,
+        )
+    if unchecked:
+        echo.warning("{} device(s) could not be checked", unchecked)
+    if not legacy and not unchecked:
+        echo.success("Every SSH device offers algorithms that do not depend on SHA-1")
+    raise typer.Exit(1 if legacy else 0)
+
+
 @cli.command(name="directives")
 def _directives(
     search: t.Optional[str] = typer.Argument(None, help="Directive ID or Name Search Pattern"),

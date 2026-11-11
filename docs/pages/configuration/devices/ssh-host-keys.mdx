@@ -65,3 +65,24 @@ will now fail with an authentication error until the `known_hosts` entry is upda
 - Give the hyperglass account a read-only role on the device (for example an EOS `role` that
   permits only `show`, `ping` and `traceroute`). Even a successful injection or impersonation
   then has nothing to escalate to.
+
+## Legacy SSH algorithms
+
+hyperglass pins its SSH library, paramiko, to the 3.x series. paramiko 5 removed every SHA-1
+based algorithm from the client: the `ssh-rsa` host key algorithm and the `*-sha1` key exchanges
+are gone and cannot be re-enabled. Older routers and switches often offer nothing else, and would
+become unreachable.
+
+To see whether your devices depend on those algorithms, run this on the hyperglass host while
+hyperglass is running:
+
+```shell
+hyperglass ssh-algorithms
+```
+
+It connects to each SSH device, reads the list of algorithms the device offers, and disconnects
+without logging in. A device reported as `legacy only` needs paramiko 3.x, or an upgrade or
+configuration change on the device (for example enabling `rsa-sha2-256` host keys and a
+`diffie-hellman-group14-sha256` or elliptic-curve key exchange). Add `--verbose` to list every
+algorithm offered. Devices behind an SSH proxy cannot be checked from the hyperglass host. The
+command exits with status 1 if any device is legacy only.

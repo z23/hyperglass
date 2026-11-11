@@ -1,6 +1,7 @@
 services:
     redis:
-        image: "redis:alpine"
+        # Pinned to a major version; an unpinned tag changes on every pull.
+        image: "redis:8-alpine"
     hyperglass:
         depends_on:
             - redis

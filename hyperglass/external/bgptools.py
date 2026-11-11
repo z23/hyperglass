@@ -8,6 +8,7 @@
 import re
 import typing as t
 import asyncio
+import hashlib
 from ipaddress import IPv4Address, IPv6Address, ip_address
 
 # Project
@@ -17,6 +18,24 @@ from hyperglass.state import use_state
 DEFAULT_KEYS = ("asn", "ip", "prefix", "country", "rir", "allocated", "org")
 
 CACHE_KEY = "hyperglass.external.bgptools"
+
+# How long a looked-up address is reused before bgp.tools is asked again.
+CACHE_SECONDS = 24 * 60 * 60
+
+# Upper bound for one whois exchange, connection included. The lookup runs in
+# a background task after every query when webhooks are enabled, so an
+# unresponsive server must not leave tasks and sockets open indefinitely.
+WHOIS_TIMEOUT_SECONDS = 10
+
+
+def _cache_key(target: str) -> str:
+    """Build the cache key for one address.
+
+    Each address has its own key so that it expires on its own. The address is
+    hashed because the state store treats `.` in a key as a separator.
+    """
+    return f"{CACHE_KEY}.{hashlib.sha256(target.encode()).hexdigest()}"
+
 
 TargetDetail = t.TypedDict(
     "TargetDetail",
@@ -101,32 +120,28 @@ def parse_whois(output: str, targets: t.List[str]) -> TargetDetail:
     return data
 
 
+async def _whois_exchange(query: bytes) -> bytes:
+    """Send a bulk whois query to bgp.tools and read the whole response."""
+    reader, writer = await asyncio.open_connection("bgp.tools", port=43)
+    try:
+        writer.write(query)
+        if writer.can_write_eof():
+            writer.write_eof()
+        await writer.drain()
+        return await reader.read(-1)
+    finally:
+        log.debug("Closing connection to bgp.tools")
+        writer.close()
+
+
 async def run_whois(targets: t.List[str]) -> str:
     """Open raw socket to bgp.tools and execute query."""
 
     # Construct bulk query
     query = "\n".join(("begin", *targets, "end\n")).encode()
 
-    # Open the socket to bgp.tools
     log.debug("Opening connection to bgp.tools")
-    reader, writer = await asyncio.open_connection("bgp.tools", port=43)
-
-    # Send the query
-    writer.write(query)
-    if writer.can_write_eof():
-        writer.write_eof()
-    await writer.drain()
-
-    # Read the response
-    response = b""
-    while True:
-        data = await reader.read(128)
-        if data:
-            response += data
-        else:
-            log.debug("Closing connection to bgp.tools")
-            writer.close()
-            break
+    response = await asyncio.wait_for(_whois_exchange(query), timeout=WHOIS_TIMEOUT_SECONDS)
 
     return response.decode()
 
@@ -141,31 +156,30 @@ async def network_info(*targets: str) -> TargetData:
     # Set default data structure.
     query_data = {t: dict.fromkeys(DEFAULT_KEYS, "") for t in query_targets}
 
-    # Get all cached bgp.tools data.
-    cached = cache.get_map(CACHE_KEY) or {}
-
-    # Try to use cached data for each of the items in the list of
-    # resources.
-    for target in (target for target in query_targets if target in cached):
-        # Reassign the cached network info to the matching resource.
-        query_data[target] = cached[target]
+    # Try to use cached data for each of the items in the list of resources.
+    uncached = []
+    for target in query_targets:
+        cached = cache.get(_cache_key(target))
+        if cached is None:
+            uncached.append(target)
+            continue
+        query_data[target] = cached
         log.bind(target=target).debug("Using cached network info")
 
-    # Remove cached items from the resource list so they're not queried.
-    targets = [t for t in query_targets if t not in cached]
-
     try:
-        if targets:
-            whoisdata = await run_whois(targets)
+        if uncached:
+            whoisdata = await run_whois(uncached)
 
             if whoisdata:
                 # If the response is not empty, parse it.
-                query_data.update(parse_whois(whoisdata, targets))
+                query_data.update(parse_whois(whoisdata, uncached))
 
                 # Cache the response
-                for target in targets:
-                    cache.set_map_item(CACHE_KEY, target, query_data[target])
-                    log.bind(target=t).debug("Cached network info")
+                for target in uncached:
+                    key = _cache_key(target)
+                    cache.set(key, query_data[target])
+                    cache.expire(key, expire_in=CACHE_SECONDS)
+                    log.bind(target=target).debug("Cached network info")
 
     except Exception as err:
         log.error(err)

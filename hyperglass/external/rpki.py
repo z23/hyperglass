@@ -2,6 +2,7 @@
 
 # Standard Library
 import typing as t
+import hashlib
 
 # Project
 from hyperglass.log import log
@@ -16,6 +17,19 @@ RPKI_STATE_MAP = {"Invalid": 0, "Valid": 1, "NotFound": 2, "DEFAULT": 3}
 RPKI_NAME_MAP = {v: k for k, v in RPKI_STATE_MAP.items()}
 CACHE_KEY = "hyperglass.external.rpki"
 
+# How long a validation result is reused. ROAs change, so a result must not be
+# kept for the life of the Redis database.
+CACHE_SECONDS = 60 * 60
+
+
+def _cache_key(ro: str) -> str:
+    """Build the cache key for one prefix and origin.
+
+    Each result has its own key so that it expires on its own. The value is
+    hashed because the state store treats `.` in a key as a separator.
+    """
+    return f"{CACHE_KEY}.{hashlib.sha256(ro.encode()).hexdigest()}"
+
 
 def rpki_state(prefix: t.Union["IPv4Address", "IPv6Address", str], asn: t.Union[int, str]) -> int:
     """Get RPKI state and map to expected integer."""
@@ -27,7 +41,8 @@ def rpki_state(prefix: t.Union["IPv4Address", "IPv6Address", str], asn: t.Union[
     state = 3
     ro = f"{prefix!s}@{asn!s}"
 
-    cached = cache.get_map(CACHE_KEY, ro)
+    key = _cache_key(ro)
+    cached = cache.get(key)
 
     if cached is not None:
         state = cached
@@ -45,7 +60,8 @@ def rpki_state(prefix: t.Union["IPv4Address", "IPv6Address", str], asn: t.Union[
                 validation_state = 3
 
             state = RPKI_STATE_MAP[validation_state]
-            cache.set_map_item(CACHE_KEY, ro, state)
+            cache.set(key, state)
+            cache.expire(key, expire_in=CACHE_SECONDS)
         except Exception as err:
             log.error(err)
             # Don't cache the state when an error produced it.

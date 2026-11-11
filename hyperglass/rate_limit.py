@@ -74,9 +74,9 @@ class RateLimitStore(RedisStore):
         return bool(allowed), int(count), int(ttl)
 
     async def _shutdown(self) -> None:
-        """Close the client using the API available in pinned redis-py 4.5."""
+        """Close the client and its connection pool."""
         if self.handle_client_shutdown:
-            await self._redis.close()
+            await self._redis.aclose()
             await self._redis.connection_pool.disconnect()
 
 

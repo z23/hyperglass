@@ -23,6 +23,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - Removed three declared dependencies that nothing imports (`PyJWT`, `aiofiles`, `distro`) and the stale `poetry.lock`; the project is locked with `requirements.lock` / `requirements-dev.lock`.
 - Upgraded the pinned packages that carried security advisories: httpx 0.24.0 to 0.28.1 (with httpcore 1.0.9 and h11 0.16.0), paramiko 3.4.0 to 3.5.1, cryptography 42.0.3 to 50.0.2, Pillow 10.2.0 to 10.4.0, jinja2 3.1.6, lxml 6.1.3, PyNaCl 1.6.2, brotli 1.2.1, certifi, idna, pygments, python-dotenv and setuptools. All other pins are unchanged.
 - Replaced the `favicons` package with a small in-repo generator (`hyperglass/frontend/favicons.py`) that produces the same 21 files. `favicons` 0.2.2 required `Pillow < 11`; Pillow is now 13.0.0, which clears its remaining advisories. SVG sources are still rasterised with svglib and reportlab.
+- Refreshed the web stack: uvicorn 0.21.1 to 0.54.0, Litestar 2.25.0, pydantic 2.6.3 to 2.14.3, the Redis client 4.5.4 to 8.1.0, typer 0.9.0 to 0.29.0, rich 15.0.0, psutil 6.1.1, xmltodict 1.0.4 and their dependencies. With the newer uvicorn, `FORWARDED_ALLOW_IPS` also accepts CIDR networks; previously a network was silently ignored.
+- The lock files are now resolved for Python 3.11, the oldest supported version, so they install correctly on both 3.11 and 3.12.
 - paramiko stays on 3.x on purpose: later major versions stop accepting SHA-1 `ssh-rsa`, which older network devices still require.
 
 ### Fixed
@@ -42,6 +44,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - [#306](https://github.com/thatmattlove/hyperglass/issues/306): Fix: allow integer values in ext_community_list_raw field for Arista BGP - @cooperwinser
 - The query rate limiter budgets an IPv6 client by its `/64` instead of by its address, so a client can no longer avoid the limit by rotating source addresses within its own prefix. IPv4-mapped IPv6 addresses share the IPv4 address's budget.
 - [#311](https://github.com/thatmattlove/hyperglass/issues/311): Fix: device and directive errors.
+- `hyperglass system-info` raised a `KeyError` for an environment variable that is never set; it now reports the configured application path.
 - The UI dependency install failed with pnpm 11 and later (`ERR_PNPM_IGNORED_BUILDS`), so a freshly built Docker image, which installed the latest pnpm, did not start. `pnpm-workspace.yaml` now carries the build-script allow-list in the form each pnpm version reads, and the Dockerfile pins pnpm to version 10.
 - [#315](https://github.com/thatmattlove/hyperglass/issues/315): Impossibile to use command "BGP Route" with Huawei NetEngine 8000 
 - [#315](https://github.com/thatmattlove/hyperglass/issues/187): Error in bgp_router query on Huawei

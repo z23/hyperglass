@@ -91,13 +91,20 @@ class HttpConfiguration(HyperglassModel):
         """Create a pre-configured http client."""
 
         # Use the CA certificates for SSL verification, if present.
-        verify = self.verify_ssl
+        verify: t.Union[bool, ssl.SSLContext] = self.verify_ssl
         if self.ssl_ca is not None:
             # Trust only the configured CA file. (httpx 0.28 deprecates passing
             # a path to `create_ssl_context`.)
             verify = ssl.create_default_context(cafile=str(self.ssl_ca))
 
-        transport_constructor = {"retries": self.retries}
+        # TLS settings belong on the transport. httpx only applies a client's
+        # `verify` and `cert` to the transport it creates itself, so with an
+        # explicit transport they would be ignored.
+        transport_constructor: t.Dict[str, t.Any] = {"retries": self.retries, "verify": verify}
+
+        # Use client certificate authentication, if defined.
+        if self.ssl_client is not None:
+            transport_constructor["cert"] = str(self.ssl_client)
 
         # Use `source` IP address as httpx transport's `local_address`, if defined.
         if self.source is not None:
@@ -106,22 +113,21 @@ class HttpConfiguration(HyperglassModel):
         transport = httpx.AsyncHTTPTransport(**transport_constructor)
 
         # Add the port to the URL only if it is not 22, 80, or 443.
-        base_url = f"{self.scheme}://{device.address!s}".strip("/")
+        host = str(device.address)
+        if ":" in host and not host.startswith("["):
+            # An IPv6 literal must be bracketed in a URL.
+            host = f"[{host}]"
+        base_url = f"{self.scheme}://{host}".strip("/")
         if device.port not in (22, 80, 443):
             base_url += f":{device.port!s}"
 
         parameters = {
-            "verify": verify,
             "transport": transport,
             "timeout": self.timeout,
             "follow_redirects": self.follow_redirects,
-            "base_url": f"{self.scheme}://{device.address!s}".strip("/"),
+            "base_url": base_url,
             "headers": {"user-agent": f"hyperglass/{__version__}", **self.headers},
         }
-
-        # Use client certificate authentication, if defined.
-        if self.ssl_client is not None:
-            parameters["cert"] = str(self.ssl_client)
 
         # Use basic authentication, if defined.
         if self.basic_auth is not None:

@@ -41,6 +41,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 - [#306](https://github.com/thatmattlove/hyperglass/issues/306): Fix: allow integer values in ext_community_list_raw field for Arista BGP - @cooperwinser
 - The query rate limiter budgets an IPv6 client by its `/64` instead of by its address, so a client can no longer avoid the limit by rotating source addresses within its own prefix. IPv4-mapped IPv6 addresses share the IPv4 address's budget.
 - [#311](https://github.com/thatmattlove/hyperglass/issues/311): Fix: device and directive errors.
+- HTTP devices on a port other than 80 or 443 are now reached: the port was computed and then left out of the client's base URL. IPv6 device addresses are bracketed.
+- The HTTP device client's `verify_ssl`, `ssl_ca` and `ssl_client` settings now take effect. They were passed to the client alongside an explicit transport, where httpx ignores them, so verification always used the default CA bundle.
+- The reachability check for external services (webhooks, RPKI) uses the host and port of the configured URL instead of assuming port 443, is bounded by the session timeout, and no longer blocks the event loop. A generic webhook keeps the port of its configured URL.
+- The bgp.tools lookup gives up after 10 seconds instead of waiting indefinitely, and its results (24 hours) and RPKI validation results (1 hour) now expire instead of being kept for the life of the Redis database.
 - [#315](https://github.com/thatmattlove/hyperglass/issues/315): Impossibile to use command "BGP Route" with Huawei NetEngine 8000 
 - [#315](https://github.com/thatmattlove/hyperglass/issues/187): Error in bgp_router query on Huawei
 - [#325](https://github.com/thatmattlove/hyperglass/pull/325): Fix code block padding in the documentation - @jagardaniel

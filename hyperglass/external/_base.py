@@ -1,14 +1,13 @@
 """Session handler for external http data sources."""
 
 # Standard Library
-import re
 import json as _json
 import socket
 import typing as t
 from json import JSONDecodeError
-from socket import gaierror
 
 # Third Party
+import anyio
 import httpx
 
 # Project
@@ -160,28 +159,32 @@ class BaseExternal:
             parsed = response
         return parsed
 
+    def _test_address(self: "BaseExternal") -> t.Tuple[str, int]:
+        """Get the host and port the base URL points at."""
+        url = httpx.URL(self.base_url)
+        host = url.host
+        if not host:
+            # A bare hostname with no scheme parses as a path.
+            host = self.base_url.split("/", 1)[0]
+        port = url.port
+        if port is None:
+            port = 80 if url.scheme == "http" else 443
+        return host, port
+
     def _test(self: "BaseExternal") -> bool:
         """Open a low-level connection to the base URL to ensure its port is open."""
         log.bind(url=self.base_url).debug("Testing connection")
 
+        host, port = self._test_address()
+
         try:
-            # Parse out just the hostname from a URL string.
-            # E.g. `https://www.example.com` becomes `www.example.com`
-            test_host = re.sub(r"http(s)?\:\/\/", "", self.base_url)
+            # Bounded by the session timeout: an unresponsive address must not
+            # hold the caller (and, for webhooks, the background task) open.
+            with socket.create_connection((host, port), timeout=self.timeout):
+                pass
 
-            # Create a generic socket object
-            test_socket = socket.socket()
-
-            # Try opening a low-level socket to make sure it's even
-            # listening on the port prior to trying to use it.
-            test_socket.connect((test_host, 443))
-
-            # Properly shutdown & close the socket.
-            test_socket.shutdown(1)
-            test_socket.close()
-
-        except gaierror as err:
-            # Raised if the target isn't listening on the port
+        except OSError as err:
+            # Name resolution failure, refused connection or timeout.
             raise self._exception(
                 f"{self.name!r} appears to be unreachable at {self.base_url!r}", err
             ) from None
@@ -190,7 +193,8 @@ class BaseExternal:
 
     async def _atest(self: "BaseExternal") -> bool:
         """Open a low-level connection to the base URL to ensure its port is open."""
-        return self._test()
+        # Name resolution and the connection attempt both block.
+        return await anyio.to_thread.run_sync(self._test)
 
     def _build_request(self: "BaseExternal", **kwargs: t.Any) -> t.Dict[str, t.Any]:
         """Process requests parameters into structure usable by http library."""
@@ -208,7 +212,9 @@ class BaseExternal:
             data,
             timeout,
             response_required,
-        ) = itemgetter(*kwargs.keys())(kwargs)
+        ) = itemgetter(
+            *kwargs.keys()
+        )(kwargs)
 
         if method.upper() not in supported_methods:
             raise self._exception(

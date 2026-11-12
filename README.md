@@ -9,7 +9,7 @@
 
 <hr/>
 
-> **Fork notice** — This is a maintained fork of [thatmattlove/hyperglass](https://github.com/thatmattlove/hyperglass) with security hardening and operational fixes for production deployments. Upstream remains the project of record for documentation and general development; use **this** repository if you want the hardened query path, rate limiting, and related bugfixes below. We do not currently open PRs upstream — divergences live here on purpose.
+> **Fork notice** — This is a maintained fork of [thatmattlove/hyperglass](https://github.com/thatmattlove/hyperglass) with security hardening and operational fixes for production deployments. Upstream remains the project of record for product documentation and general development. Install from **this** repository for the hardened query path, rate limiting, and the bugfixes below. We do not currently open PRs upstream — divergences live here on purpose.
 >
 > **Hardening & fixes in this fork (vs upstream `main`):**
 >
@@ -27,7 +27,7 @@
 > - **Arista VRF-aware** builtin directives and BGP route VRF command fixes
 > - **Reproducible Docker builds** from `requirements.lock`
 >
-> Upstream docs and the live demo still apply: [hyperglass.dev](https://hyperglass.dev). File fork-specific issues against [z23/hyperglass](https://github.com/z23/hyperglass/issues).
+> Product docs and the live demo still apply: [hyperglass.dev](https://hyperglass.dev). Install steps are in this repository. File fork-specific issues against [z23/hyperglass](https://github.com/z23/hyperglass/issues).
 
 <div align="center">
 
@@ -73,7 +73,7 @@ hyperglass is intended to make implementing a looking glass too easy not to do, 
 
 *To request support for a specific platform, please [submit a Github Issue](https://github.com/thatmattlove/hyperglass/issues/new) with the **feature** label.*
 
-### [Get Started →](https://hyperglass.dev/installation)
+### [Get Started →](docs/pages/installation/docker.mdx)
 
 ## Community
 

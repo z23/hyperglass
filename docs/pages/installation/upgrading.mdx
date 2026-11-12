@@ -1,11 +1,16 @@
 ## Using Docker
 
+Install and upgrade from [z23/hyperglass](https://github.com/z23/hyperglass). This repository has no release tag yet, so an install tracks the default branch. Do not check out `v2.0.4`. That tag is upstream's release, and it is not this fork's code.
+
+If `/opt/hyperglass` was cloned from `thatmattlove/hyperglass`, point `origin` at this repository first. `git checkout -B main origin/main` moves the local `main` branch to this fork's `main`.
+
 ```shell copy
 cd /opt/hyperglass
 docker compose down
 docker compose rm -f
-git fetch
-git checkout v2.0.4
+git remote set-url origin https://github.com/z23/hyperglass.git
+git fetch origin
+git checkout -B main origin/main
 docker compose build
 docker compose up
 ```

@@ -113,7 +113,7 @@ const config: DocsThemeConfig = {
             </head>
         );
     },
-    docsRepositoryBase: "https://github.com/thatmattlove/hyperglass/tree/main/docs",
+    docsRepositoryBase: "https://github.com/z23/hyperglass/tree/main/docs",
     banner: {
         dismissible: true,
         content: "🎉 hyperglass 2.0 is here! This documentation is still in development, though.",
@@ -137,7 +137,7 @@ const config: DocsThemeConfig = {
         ),
     },
     project: {
-        link: "https://github.com/thatmattlove/hyperglass",
+        link: "https://github.com/z23/hyperglass",
     },
 };
 

@@ -95,6 +95,13 @@ def validate_large_community(value: str) -> bool:
     return False
 
 
+def _is_bgp_community(value: str) -> bool:
+    return any(
+        validator(value) is True
+        for validator in (validate_decimal, validate_new_format, validate_large_community)
+    )
+
+
 class ValidateBGPCommunity(InputPlugin):
     """Validate a BGP community string."""
 
@@ -108,16 +115,16 @@ class ValidateBGPCommunity(InputPlugin):
 
     def validate(self, query: "Query") -> "InputPluginValidationReturn":
         """Ensure an input query target is a valid BGP community."""
-
-        params = use_state("params")
-
-        if not isinstance(query.query_target, str):
+        target = query.query_target
+        if isinstance(target, str):
+            targets = [target]
+        elif isinstance(target, list):
+            targets = target
+        else:
             return None
 
-        for validator in (validate_decimal, validate_new_format, validate_large_community):
-            result = validator(query.query_target)
-            if result is True:
-                return True
+        if targets and all(isinstance(item, str) and _is_bgp_community(item) for item in targets):
+            return True
 
-        self.failure_reason = params.messages.invalid_input
+        self.failure_reason = use_state("params").messages.invalid_input
         return False

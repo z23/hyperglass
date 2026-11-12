@@ -26,6 +26,7 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 
 ### Fixed
 
+- A BGP community target posted as a list skipped the community grammar. A one-element list such as `['65000:1 vrf all']` was accepted, and the extra words were copied into the show command. Each list element is now checked with the same community grammar as a string. See [#45](https://github.com/z23/hyperglass/issues/45).
 - SSH proxy tunnel setup no longer performs blocking network I/O on the event loop; proxy connections are established in the same worker thread as the device connection.
 - Connection error messages (`connection_error` template) raised an internal `KeyError` instead of rendering, because the default template's `{device_name}` placeholder was never supplied. Message templates now tolerate unmatched placeholders (and never raise while formatting), and `device_name` is populated.
 - A `proxy` without an explicit `platform` field was rejected at startup despite `platform` being documented as optional with a `linux_ssh` default. It is now optional as documented.

@@ -123,8 +123,8 @@ def test_community_query_rejects_extra_words_for_string_and_list(community_query
             "show ipv6 bgp community 65000:1",
         ],
         "lab-frr": [
-            'vtysh -c "show bgp ipv4 unicast community 65000:1"',
-            'vtysh -c "show bgp ipv6 unicast community 65000:1"',
+            "vtysh -c 'show bgp ipv4 unicast community 65000:1'",
+            "vtysh -c 'show bgp ipv6 unicast community 65000:1'",
         ],
     }
     cases = (
